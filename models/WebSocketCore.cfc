@@ -93,7 +93,7 @@ component {
 	 * Send a message to a specific channel
 	 */
 	function sendMessage( required message, required channel ) {
-		println("sending message to specific channel: #message#");
+		//println("sending message to specific channel: #message#");
 		getWSHandler().sendMessage( channel, message );
 	}
 
@@ -101,7 +101,7 @@ component {
 	 * Broadcast a message to all connected channels
 	 */
 	function broadcastMessage( required message ) {
-		println("broadcasting message: #message#");
+		//println("broadcasting message: #message#");
 		getWSHandler().broadcastMessage( message );
 	}
 
