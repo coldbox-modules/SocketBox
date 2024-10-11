@@ -3,24 +3,30 @@
  */
 component extends="BaseExchange" {
 
-	function routeMessage( required WebSocketSTOMP STOMPBroker, required any message ) {
-		var destination = message.getHeader( "destination", "" );
+	function routeMessage( required WebSocketSTOMP STOMPBroker, required string destination, required any message ) {
 		var subs = STOMPBroker.getSubscriptions();
-		if( !structKeyExists( subs, destination ) ) {
-			return;
+		if( structKeyExists( subs, destination ) ) {
+			// Route exact matches to subscriptions
+			subs[ destination ].each( function( channelSubID, subscription ) {
+				if( subscription.type == "channel" ) {
+					var subscriptionID = subscription.subscriptionID;
+					// actually send to a channel.
+					routeInternal( STOMPBroker, message, subscription[ "channel" ], destination, subscriptionID )
+				} else {
+					// type == "internal"
+					subscription[ "callback" ]( message );
+				}
+			} );
 		}
-		// Change from SEND to MESSAGE
-		message.setCommand( "MESSAGE" );
-		// Remove sensitive details
-		message.removeHeader("login");
-		message.removeHeader("passcode");
-		subs[ destination ].each( function( subscriptionID, subscription ) {
-			var channel = subscription[ "channel" ];
-			if( channel.isOpen() ) {
-				message.setHeader( "subscription", subscription.subscriptionID );
-				STOMPBroker.sendMessage( STOMPBroker.getMessageParser().serialize( message ), channel );
-			}
-		} );
+
+		var bindings = getProperty( "bindings", {} );
+		if( structKeyExists( bindings, destination ) ) {
+			bindings[ destination ].each( function( bindingID, binding ) {
+				// This will match an exchange and process again from the top
+				STOMPBroker.routeMessage( destination, message )
+			} );
+		}
+
 	}
 
 }

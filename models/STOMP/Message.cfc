@@ -5,6 +5,8 @@ component accessors=true {
 	property name="command" type="string";
 	property name="headers" type="struct";
 	property name="body" type="string";
+	// Will be null if this message didn't originate from a WebSocket
+	property name="channel";
 
 	variables.requiredHeaders = {
 		"CONNECT": [ "accept-version" ], // , "host"
@@ -27,10 +29,13 @@ component accessors=true {
 	/**
 	 * Create a new STOMP message.
 	 */
-	function init( required string command, struct headers={}, string body="" ) {
+	function init( required string command, struct headers={}, any body="", channel ) {
 		setCommand( command );
 		setHeaders( headers );
 		setBody( body );
+		if( !isNull( arguments.channel ) ) {
+			setChannel( arguments.channel );
+		}
 		return this;
 	}
 
@@ -67,13 +72,21 @@ component accessors=true {
 	 * Get the body of the message.
 	 */
 	function getBody() {
-		if( getHeader( "content-type" ) == "application/json" ) {
+		if( getHeader( "content-type", "" ) == "application/json" ) {
 			// validate JSON
 			if( !isJSON( body ) ) {
-				throw( type="InvalidJSON", message="Message has content-type of JSON, but message body is not valid JSON" );
+				throw( type="InvalidJSON", message="Message has content-type of JSON, but message body is not valid JSON. Body: #body# #serializeJSON(headers)#, #getCommand()#" );
+
 			}
 			return deserializeJSON( body );
 		}
+		return body;
+	}
+
+	/**
+	 * Get the body of the message.
+	 */
+	function getBodyRaw() {
 		return body;
 	}
 
@@ -85,7 +98,7 @@ component accessors=true {
 			arguments.body = serializeJSON( arguments.body );
 			setHeader( "content-type", "application/json" );
 		}
-		variables.body = arguments.body;
+		variables.body = toString( arguments.body );
 		return this;
 	}
 
@@ -111,6 +124,16 @@ component accessors=true {
 			}
 		}
 		return this;
+	}
+
+	function clone() {
+		return new Message(
+			getCommand(),
+			// Remove sensitive details
+			getHeaders().filter( (k,v)=> k != "login" && k != "passcode" ),
+			getBody(),
+			getChannel()
+		);
 	}
 
 

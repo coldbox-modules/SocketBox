@@ -6,22 +6,89 @@
  * Extend this CFC with a /WebSocket.cfc in your web root.
  */
 component extends="WebSocketCore" {
-	variables.heartBeatMS = 10000;
-	variables.debugMode = false;
 
-	if( variables.debugMode || !structKeyExists( application, "STOMPExchanges" ) ) {
-		_configure();			
+	variables configDefaults = {
+		"heartBeatMS" : 10000,
+		"debugMode" : false,
+		"exchanges" : {
+			 /*
+			 "direct" : {
+				 "bindings" : {
+					 "destination1" : "destination2",
+					"destination3" : "/topic/foo.bar"
+				 }
+			 },
+			 "topic" : {
+				 "bindings" : {
+					"myTopic.brad.##" : "destination1",
+					"anotherTopic.*" : "fanout/myFanout"
+				}
+			},
+			"fanout" : {
+				"bindings" : {
+					"myFanout" : [
+						"destination1",
+						"direct/destination2"
+					],
+					"anotherFanout" : [
+						"destination3",
+						"topic/destination4"
+					]
+				}
+			},
+			"distribution" : {
+				"type" : "random", // roundrobin
+				"bindings" : {
+					"myDistribution" : [
+						"destination1",
+						"direct/destination2"
+					]
+				}
+			}
+			*/
+		},
+		"subscriptions" : {
+			/*
+			"destination1" : (message)=>{
+				logMessage( message.getBody() );
+			},
+			"destination2" : ()=>{}
+			*/
+		}
+	};
+
+	function reloadCheck() {
+		try {
+		// This may just be defaults right now
+		var config = application.STOMPBroker.config ?: configDefaults;
+
+		if( config.debugMode || !structKeyExists( application, "STOMPBroker" ) ) {
+			cflock( name="WebSocketBrokerInit", type="exclusive", timeout=10 ) {
+				if( config.debugMode || !structKeyExists( application, "STOMPBroker" ) ) {
+					_configure();
+				}
+			}
+		}
+		} catch( any e ) {
+			e.printStackTrace();
+		}
 	}
 
+	remote function onProcess() {
+		reloadCheck();
+		super.onProcess( argumentCollection=arguments );
+	}
 	/**
 	 * A new incoming message has been received.
 	 */
 	function onMessage( required messageText, required channel ) {
 		// PING messages are empty
 		if( !len( trim( messageText ) ) ) {
+			//logMessage("Received PING message");
 			sendMessage( chr(10), channel );
 		} else {
-			var message = getMessageParser().deserialize( messageText );
+			var message = getMessageParser().deserialize( messageText, channel );
+			//logMessage("Received #message.getCommand()# message");
 			switch( message.getCommand() ) {
 				case "CONNECT":
 				case "STOMP":
@@ -55,7 +122,7 @@ component extends="WebSocketCore" {
 					onAbort( message, channel );
 					break;
 				default:
-					println( "Unknown STOMP command: #message.getCommand()#" );
+					logMessage( "Unknown STOMP command: #message.getCommand()#" );
 			}
 		}
 	}
@@ -63,21 +130,23 @@ component extends="WebSocketCore" {
 	
 
 	function onSTOMPConnect( required message, required channel ) { 
-		println("new STOMP connection");
+		logMessage("new STOMP connection");
 		try {
-			if( authenticate( message.getHeader("login",""), message.getHeader("passcode",""), message.getHeader("host", "") ) ) {
+			if( authenticate( message.getHeader("login",""), message.getHeader("passcode",""), message.getHeader("host", ""), channel ) ) {
+					var sessionID = channel.hashCode();
 					getSTOMPConnections()[ channel.hashCode() ] = {
 						"channel" : channel,
 						"login" : message.getHeader("login",""),
-						"connectDate" : now()
+						"connectDate" : now(),
+						"sessionID" : sessionID
 					};
 					var message = newMessage(
 						"CONNECTED",
 						{
 							"version" : "1.2",
-							"heart-beat" : "#variables.heartBeatMS#,#variables.heartBeatMS#",
+							"heart-beat" : "#getConfig().heartBeatMS#,#getConfig().heartBeatMS#",
 							"server" : "SocketBox (STOMP)",
-							"session" : channel.hashCode()
+							"session" : sessionID
 						} )
 						.validate();
 					sendMessage( getMessageParser().serialize(message), channel )
@@ -91,27 +160,22 @@ component extends="WebSocketCore" {
 	}
 
 	function onSTOMPDisconnect( required message, required channel ) {
-		println("STOMP client disconnected");
-		removeAllSubscriptsionForChannel( channel );
+		logMessage("STOMP client disconnected");
+		removeAllSubscriptionsForChannel( channel );
 		getSTOMPConnections().delete( channel.hashCode() );
 		sendReceipt( message, channel );
 	}
 
 	function onSend( required message, required channel ) {
-		println("STOMP SEND message received");
-		var exchanges = getExchanges();
+		logMessage("STOMP SEND message received");
 		var destination = message.getHeader( "destination", "" );
-		var exchange = "direct";
-		if( listFind( destination, "/" ) ){ 
-			exchange = listFirst( destination, "/" );
-			destination = listRest( destination, "/" );
-		}
+		var parsedDest = parseDestination( destination );
 		var channelID = channel.hashCode();
 		var login = getSTOMPConnections()[ channelID ].login ?: '';
 		
 		try {
-			if( !authorize( login, exchange, destination, "write" ) ) {
-				sendError( "Authorization failure", "Login [#login#] is not authorized with write access to the destination [#exchange#/#destination#]", channel, message.getHeader( "receipt", "" ) );
+			if( !authorize( login, parsedDest.exchange, parsedDest.destination, "write", channel ) ) {
+				sendError( "Authorization failure", "Login [#login#] is not authorized with write access to the destination [#parsedDest.exchange#/#parsedDest.destination#]", channel, message.getHeader( "receipt", "" ) );
 				return;
 			}	
 		} catch( "STOMP-Authorization-failure" e ) {
@@ -119,20 +183,18 @@ component extends="WebSocketCore" {
 			return;
 		}
 
-		if( structKeyExists( exchanges, exchange ) ) {
-			exchanges[ exchange ].routeMessage( this, message );
-		}
+		routeMessage( destination, message );
 		sendReceipt( message, channel );
 	}
 
 	function onSubscribe( required message, required channel ) {
-		println("STOMP SUBSCRIBE message received");
+		logMessage("STOMP SUBSCRIBE message received");
 		var subscriptionID = message.getHeader( "id" );
 		var destination = message.getHeader( "destination" );
 		var channelID = channel.hashCode();
 		var login = getSTOMPConnections()[ channelID ].login ?: '';
 		try {
-			if( !authorize( login, "", destination, "read" ) ) {
+			if( !authorize( login, "", destination, "read", channel ) ) {
 				sendError( "Authorization failure", "Login [#login#] is not authorized with read access to the destination [#destination#]", channel, message.getHeader( "receipt", "" ) );
 				return;
 			}	
@@ -150,29 +212,51 @@ component extends="WebSocketCore" {
 			}
 		}
 		
-		subs[ destination ][subscriptionID] = {
+		subs[ destination ][channelID & ":" & subscriptionID] = {
+			"type" : "channel",
 			"channel" : channel,
 			"channelID" : channel.hashCode(),
 			"subscriptionID" : subscriptionID,
-			"ack" : ack
+			"ack" : ack,
+			"callback" : ""
 		};
 		sendReceipt( message, channel );
 	}
 
+	private function registerInternalSubscription( required struct subs, required string subscriptionID, required string destination, required callback ) {		
+		if( !structKeyExists( subs, destination ) ) {
+			cflock( name="WebSocketSTOMP-STOMPSubscriptions-#destination#", type="exclusive", timeout=10 ) {
+				if( !structKeyExists( subs, destination ) ) {
+					subs[ destination ] = {};
+				}
+			}
+		}
+		
+		subs[ destination ][subscriptionID] = {
+			"type" : "internal",
+			"channel" : "",
+			"channelID" : "",
+			"subscriptionID" : subscriptionID,
+			"ack" : "",
+			"callback" : callback
+		};
+	}
+
 	function onUnsubscribe( required message, required channel ) {
-		println("STOMP UNSUBSCRIBE message received");
+		logMessage("STOMP UNSUBSCRIBE message received");
+		var channelID = channel.hashCode();
 		var subscriptionID = message.getHeader( "id" );
 		var subs = getSubscriptions();
 		var dests = structKeyArray( subs );
 		for( var dest in dests ) {
 			// Ignored if not exists
-			subs[ dest ].delete( subscriptionID );			
+			subs[ dest ].delete( channelID & ":" & subscriptionID );			
 		}
 		sendReceipt( message, channel );
 	}
 
 	function onAck( required message, required channel ) {
-		println("STOMP ACK message received");
+		logMessage("STOMP ACK message received");
 		var messageID = message.getHeader( "id" );
 		var transaction = message.getHeader( "transaction", "" );
 		// TODO: Implement
@@ -180,7 +264,7 @@ component extends="WebSocketCore" {
 	}
 
 	function onNack( required message, required channel ) {
-		println("STOMP NACK message received");
+		logMessage("STOMP NACK message received");
 		var messageID = message.getHeader( "id" );
 		var transaction = message.getHeader( "transaction", "" );
 		// TODO: Implement
@@ -188,21 +272,21 @@ component extends="WebSocketCore" {
 	}
 
 	function onBegin( required message, required channel ) {
-		println("STOMP BEGIN message received");
+		logMessage("STOMP BEGIN message received");
 		var transaction = message.getHeader( "transaction", "" );
 		// TODO: Implement
 		sendReceipt( message, channel );
 	}
 
 	function onCommit( required message, required channel ) {
-		println("STOMP COMMIT message received");
+		logMessage("STOMP COMMIT message received");
 		var transaction = message.getHeader( "transaction", "" );
 		// TODO: Implement
 		sendReceipt( message, channel );
 	}
 
 	function onAbort( required message, required channel ) {
-		println("STOMP ABORT message received");
+		logMessage("STOMP ABORT message received");
 		var transaction = message.getHeader( "transaction", "" );
 		// TODO: Implement
 		sendReceipt( message, channel );
@@ -224,14 +308,14 @@ component extends="WebSocketCore" {
 	/**
 	 * Override to implement your own authentication logic
 	 */
-	function authenticate( required string login, required string passcode, string host ) {
+	boolean function authenticate( required string login, required string passcode, string host, required channel ) {
 		return true;
 	}
 
 	/**
 	 * Override to implement your own authorization logic
 	 */
-	function authorize( required string login, required string exchange, required string destination, required string access ) {
+	boolean function authorize( required string login, required string exchange, required string destination, required string access, required channel ) {
 		return true;
 	}
 
@@ -257,94 +341,95 @@ component extends="WebSocketCore" {
 	}
 
 	function getSubscriptions() {
-		if( !structKeyExists( application, "STOMPSubscriptions" ) ) {
-			cflock( name="WebSocketSTOMP-STOMPSubscriptions-init", type="exclusive", timeout=10 ) {
-				if( !structKeyExists( application, "STOMPSubscriptions" ) ) {
-					application.STOMPSubscriptions = {};
-				}
-			}
-		}
-		return application.STOMPSubscriptions;
+		reloadCheck();
+		return application.STOMPBroker.STOMPSubscriptions;
 	}
 
 	function getExchanges() {
-		if( !structKeyExists( application, "STOMPExchanges" ) ) {
-			cflock( name="WebSocketSTOMP-STOMPExchanges-init", type="exclusive", timeout=10 ) {
-				if( !structKeyExists( application, "STOMPExchanges" ) ) {
-					application.STOMPExchanges = {};
-				}
-			}
-		}
-		return application.STOMPExchanges;
+		reloadCheck();
+		return application.STOMPBroker.STOMPExchanges;
 	}
 
 	function getSTOMPConnections() {
-		if( !structKeyExists( application, "STOMPConnections" ) ) {
-			cflock( name="WebSocketSTOMP-STOMPConnections-init", type="exclusive", timeout=10 ) {
-				if( !structKeyExists( application, "STOMPConnections" ) ) {
-					application.STOMPConnections = {};
-				}
-			}
-		}
-		return application.STOMPConnections;
+		reloadCheck();
+		return application.STOMPBroker.STOMPConnections;
+	}
+
+	function getConfig() {
+		reloadCheck();
+		return application.STOMPBroker.config;
 	}
 
 	/**
 	 * Get, or intialize the method parser from the application scope
 	 */
 	function getMessageParser() {
-		if( !structKeyExists( application, "WebSocketSTOMPMethodParser" ) ) {
-			cflock( name="WebSocketSTOMPMethodParser", type="exclusive", timeout=10 ) {
-				if( !structKeyExists( application, "WebSocketSTOMPMethodParser" ) ) {
-					application.WebSocketSTOMPMethodParser = new STOMP.MessageParser();
-				}
-			}
-		}
-		return application.WebSocketSTOMPMethodParser;
+		reloadCheck();
+		return application.STOMPBroker.WebSocketSTOMPMethodParser;
 	}
 
-	function newMessage( required string command, struct headers={}, string body="" ) {
+	function newMessage( required string command, struct headers={}, any body="" ) {
 		return new STOMP.Message( arguments.command, arguments.headers, arguments.body );
 	}
 
+	// do not call an methods inside here that call reloadChecks() or you'll get a stack overflow!
 	function _configure() {
-		application.WebSocketSTOMPMethodParser = new STOMP.MessageParser();
+		application.STOMPBroker = {
+			WebSocketSTOMPMethodParser = new STOMP.MessageParser(),
+			// Don't blow away subscriptions if debugmode is on
+			STOMPSubscriptions = application.STOMPBroker.STOMPSubscriptions ?: {},
+			STOMPExchanges = {},
+			// Don't blow away connections if debugmode is on
+			STOMPConnections = application.STOMPBroker.STOMPConnections ?: {},
+			config = configDefaults
+		};
 		var config = configure();
+		// Add in defaults
+		config.append( configDefaults, false );
+
 		if( !structKeyExists( local, "config" ) || !isStruct( local.config ) ) {
 			throw( type="InvalidConfiguration", message="WebSocket STOMP configure() method must return a struct" );
 		}
-		var exchanges = getExchanges();
+		application.STOMPBroker.config = local.config;
+		var exchanges = application.STOMPBroker.STOMPExchanges;
 		exchanges[ "direct" ] = new STOMP.exchange.DirectExchange({});
 		config.exchanges = config.exchanges ?: {};
-		exchanges.append( config.exchanges );
+		exchanges.append( config.exchanges.map( (name,props)=>{
+			props = duplicate( props );
+			props.class = v.class ?: name;
+			props.name = name;
+			switch(props.class) {
+				case "direct":
+					return new STOMP.exchange.DirectExchange( properties=props );
+				case "topic":
+					return new STOMP.exchange.TopicExchange( properties=props );
+				case "fanout":
+					return new STOMP.exchange.FanoutExchange( properties=props );
+				case "distribution":
+					return new STOMP.exchange.DistributionExchange( properties=props );
+				default:
+					// struct key should be fqn to a CFC
+					return createObject( "component", props.class ).init( properties=props )
+			}
+		} ) );
+
+		// re-create internal subscriptions
+		removeAllInternalSubscriptions(application.STOMPBroker.STOMPSubscriptions);
+		config.subscriptions = config.subscriptions ?: {};
+		var subCounter = 0;
+		config.subscriptions.each( (destination, callback)=>{
+			var subscriptionID = "internal-" & subCounter++;
+			registerInternalSubscription( application.STOMPBroker.STOMPSubscriptions, subscriptionID, destination, callback )
+		} );
+		
 	}
 
 	function configure() {
 		// Override me
-		return {
-			"exchanges" : {
-				 /* "direct" : new STOMP.exchange.DirectExchange({})
-				 "topic" : new STOMP.exchange.TopicExchange({
-				 	  "myTopic.brad" : [
-						"destination1"
-						"destination2"
-					],
-					"anotherTopic.*" : [
-						"destination3",
-						"destination4"
-					]
-				}),
-				"fanout" : new STOMP.exchange.FanoutExchange({
-					"destinations" : [
-						"destination5",
-						"destination6"
-					]
-				}) */
-			}
-		};
+		return configDefaults;
 	}
 
-	function removeAllSubscriptsionForChannel( required channel ) {
+	function removeAllSubscriptionsForChannel( required channel ) {
 		var channelID = channel.hashCode();
 		var subs = getSubscriptions();
 		for( var destinationID in subs ) {
@@ -357,21 +442,56 @@ component extends="WebSocketCore" {
 		}
 	}
 
+	function removeAllInternalSubscriptions(required struct subs) {
+		for( var destinationID in subs ) {
+			var dest = subs[ destinationID ];
+			for( var subscriptionID in dest ) {
+				if( dest[ subscriptionID ].type == "internal" ) {
+					dest.delete( subscriptionID );
+				}
+			}
+		}
+	}
+
 	function onClose( required channel ) {
 		super.onClose( arguments.channel );
-		removeAllSubscriptsionForChannel( arguments.channel );
+		removeAllSubscriptionsForChannel( arguments.channel );
 		getSTOMPConnections().delete( channel.hashCode() );
 	}
 
-	function send( required string destination, required any messageData ) {
-		var exchange = "direct";
-		if( listFind( destination, "/" ) ){ 
-			exchange = listFirst( destination, "/" );
-			destination = listRest( destination, "/" );
-		}
+	function send( required string destination, required any messageData, struct headers={} ) {
+		reloadCheck();
+		routeMessage( destination, newMessage("SEND", headers, messageData ) );
+	}
+
+	function routeMessage( required string destination, required Message message ) {
+		var parsedDest = parseDestination( destination );
 		var exchanges = getExchanges();
-		if( structKeyExists( exchanges, exchange ) ) {
-			exchanges[ exchange ].routeMessage( this, newMessage("SEND", { "destination" : destination }, messageData ) );
+		if( structKeyExists( exchanges, parsedDest.exchange ) ) {
+			exchanges[ parsedDest.exchange ].routeMessage( this, parsedDest.destination, message );
+		}
+	}
+
+	Struct function parseDestination( required string destination ) {
+		var result = {
+			exchange = "direct",
+			destination = destination
+		};
+		
+		if( listFind( destination, "/" ) ){ 
+			result.exchange = listFirst( destination, "/" );
+			result.destination = listRest( destination, "/" );
+		}
+		return result;
+	}
+
+	Struct function getConnectionDetails( required channel ) {
+		return getSTOMPConnections()[ channel.hashCode() ] ?: {};
+	}
+
+	private function logMessage( required any message ) {
+		if( getConfig().debugMode ) {
+			println( arguments.message );
 		}
 	}
 

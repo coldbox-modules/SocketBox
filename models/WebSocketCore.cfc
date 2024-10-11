@@ -75,7 +75,12 @@ component {
 	 * A new incoming message has been received.  Don't override this method.
 	 */
 	private function _onMessage( required message, required channel ) {
-		onMessage( message.getData(), channel );
+		var messageText = message;
+		// Backwards compat for first iteration of websocket listener
+		if( !isSimpleValue( messageText ) ) {
+			messageText = message.getData();
+		}
+		onMessage( messageText, channel );
 	}
 
 	/**

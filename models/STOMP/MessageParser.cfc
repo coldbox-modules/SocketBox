@@ -6,25 +6,26 @@ component {
 	/**
 	 * Convert the STOMP message to a string.
 	 */
-	function serialize( required Message message ) {
+	function serialize( required message ) {
 		var buffer = createObject("java", "java.lang.StringBuffer").init();
 		buffer.append( message.getCommand() ).append( chr(10) );
-		var body = message.getBody();
+		var body = toString( message.getBodyRaw() );
 		if( body != "" ) {
 			message.setHeader( "content-length", len( body.getBytes() ) );	
 		}
 		for( var key in message.getHeaders() ) {
 			buffer.append( encode( key ) ).append( ":" ).append( encode( message.getHeaders()[ key ] ) ).append( chr(10) );
 		}
-		buffer.append( chr(10) ).append( message.getBody() ).append( chr(0) );
+		buffer.append( chr(10) ).append( body ).append( chr(0) );
 		return buffer.toString();
 	}
 
 	/**
 	 * Parse a STOMP message from a string.
 	 */
-	Message function deserialize( required string message ) {
+	Message function deserialize( required string message, required channel ) {
 		var position = 0;
+		var headers = {};
 		var readNextLine = () => {
 			// if we're at the end of the message, return an empty string
 			if( position >= len( message ) ) {
@@ -86,7 +87,7 @@ component {
 			body = readBody( headers[ "content-length" ] ?: -1 );
 		}
 
-		return new Message( command, headers, body ).validate();
+		return new Message( command, headers, body, channel ).validate();
 	}
 
 	/**
