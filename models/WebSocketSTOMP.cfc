@@ -7,7 +7,7 @@
  */
 component extends="WebSocketCore" {
 
-	variables configDefaults = {
+	variables.configDefaults = {
 		"heartBeatMS" : 10000,
 		"debugMode" : false,
 		"exchanges" : {
@@ -69,8 +69,8 @@ component extends="WebSocketCore" {
 				}
 			}
 		}
-		} catch( any e ) {
-			e.printStackTrace();
+		} catch( any e ) {			
+			println( e );
 		}
 	}
 
@@ -140,7 +140,7 @@ component extends="WebSocketCore" {
 						"connectDate" : now(),
 						"sessionID" : sessionID
 					};
-					var message = newMessage(
+					var message2 = newMessage(
 						"CONNECTED",
 						{
 							"version" : "1.2",
@@ -149,7 +149,7 @@ component extends="WebSocketCore" {
 							"session" : sessionID
 						} )
 						.validate();
-					sendMessage( getMessageParser().serialize(message), channel )
+					sendMessage( getMessageParser().serialize(message2), channel )
 			} else {
 				sendError( "Invalid login", "Invalid login", channel, message.getHeader( "receipt", "" ) );
 			}
@@ -460,7 +460,7 @@ component extends="WebSocketCore" {
 	}
 
 	function send( required string destination, required any messageData, struct headers={} ) {
-		reloadCheck();
+		reloadCheck();		
 		routeMessage( destination, newMessage("SEND", headers, messageData ) );
 	}
 
@@ -478,7 +478,7 @@ component extends="WebSocketCore" {
 			destination = destination
 		};
 		
-		if( listFind( destination, "/" ) ){ 
+		if( listLen( destination, "/" ) > 1 ){ 
 			result.exchange = listFirst( destination, "/" );
 			result.destination = listRest( destination, "/" );
 		}

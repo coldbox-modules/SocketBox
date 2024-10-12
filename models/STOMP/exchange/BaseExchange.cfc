@@ -35,7 +35,7 @@ component accessors="true" {
 			// Setup new message object
 			message.setCommand( "MESSAGE" );
 			message.setHeader( "subscription", subscriptionID );
-			message.setHeader( "message-id", createGUID() );
+			message.setHeader( "message-id", createUUID() );
 			message.setHeader( "destination", destination );
 			STOMPBroker.sendMessage( STOMPBroker.getMessageParser().serialize( message ), channel );
 		}

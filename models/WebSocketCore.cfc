@@ -4,10 +4,7 @@
  * Extend this CFC with a /WebSocket.cfc in your web root.
  */
 component {
-	variables.serverClass = "";
-	variables.SITE_DEPLOYMENT_KEY = "";
-	variables.WEBSOCKET_REQUEST_DETAILS = "";
-	variables.serverType = detectServerType();
+	detectServerType();
 	
 	/**
 	 * Front controller for all WebSocket incoming messages
@@ -15,7 +12,7 @@ component {
 	remote function onProcess() {
 		try {
 			var WSMethod = arguments.WSMethod ?: "";
-			var methodArgs = serverClass.getCurrentExchange().getAttachment( WEBSOCKET_REQUEST_DETAILS ) ?: [];
+			var methodArgs = application.socketBox.serverClass.getCurrentExchange().getAttachment( application.socketBox.WEBSOCKET_REQUEST_DETAILS ) ?: [];
 			var realArgs = [];
 			// Adobe's argumentCollection doesn't work with a java.util.List :/
 			for( var arg in methodArgs ) {
@@ -34,8 +31,8 @@ component {
 				default:
 					println("Unknown method: #WSMethod#");
 			}
-		} catch (any e) {
-			e.printStackTrace();
+		} catch (any e) {			
+			println( e );
 			rethrow;
 		}
 	}
@@ -118,15 +115,21 @@ component {
 	  * Get Undertow WebSocket handler from the underlying server
 	  */
 	private function getWSHandler() {
-		if( serverType == "boxlang-miniserver" ) {
-			var wsHandler = serverClass.getWebsocketHandler();
+		if( application.socketBox.serverType == "boxlang-miniserver" ) {
+			return application.socketBox.serverClass.getWebsocketHandler();
 		} else {
-			var wsHandler = serverClass.getCurrentExchange().getAttachment( SITE_DEPLOYMENT_KEY ).getWebsocketHandler();
+			var exchange = application.socketBox.serverClass.getCurrentExchange()
+			if( !isNull( exchange ) ) {
+				return exchange.getAttachment( application.socketBox.SITE_DEPLOYMENT_KEY ).getWebsocketHandler();
+			}
+			// If we're in a cfthread, we won't have a "current" exchange in ThreadLocal
+			var deployment = application.socketBox.deployment ?: "";
+			if( isSimpleValue( deployment ) ) {
+				throw( type="WebSocketHandlerNotFound", message="WebSocket handler not found (no deployment name stored)" );
+			}
+			return deployment.getWebsocketHandler();				
 		}
-		if( isNull( wsHandler ) ) {
-			throw( type="WebSocketHandlerNotFound", message="WebSocket handler not found" );
-		}
-		return wsHandler;
+		throw( type="WebSocketHandlerNotFound", message="WebSocket handler not found" );
 	}
 
 	/**
@@ -147,19 +150,30 @@ component {
 	 * Detect if we're on CommandBox or the BoxLang Miniserver
 	 */
 	private function detectServerType() {
-		try {
-			variables.serverClass = createObject('java', 'runwar.Server')
-			variables.SITE_DEPLOYMENT_KEY = createObject('java', 'runwar.undertow.SiteDeploymentManager' ).SITE_DEPLOYMENT_KEY;
-			variables.WEBSOCKET_REQUEST_DETAILS = createObject('java', 'runwar.undertow.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS;
-			return "runwar";
-		} catch( any e ) {
-			try {
-				variables.serverClass = createObject('java', 'ortus.boxlang.web.MiniServer')
-				variables.WEBSOCKET_REQUEST_DETAILS = createObject('java', 'ortus.boxlang.web.handlers.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS;
-				return "boxlang-miniserver";
-			} catch( any e) {
-				throw( type="ServerTypeNotFound", message="This websocket library can only run in CommandBox or the BoxLang Miniserver." );
+		if( isNull( application.socketBox ) ) {
+			cflock( name="socketBox-init", type="exclusive", timeout=10 ) {
+				if( isNull( application.socketBox ) ) {
+					try {
+						application.socketBox.serverClass = createObject('java', 'runwar.Server')
+						application.socketBox.SITE_DEPLOYMENT_KEY = createObject('java', 'runwar.undertow.SiteDeploymentManager' ).SITE_DEPLOYMENT_KEY;
+						application.socketBox.WEBSOCKET_REQUEST_DETAILS = createObject('java', 'runwar.undertow.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS;
+						application.socketBox.serverType = "runwar";
+						application.socketBox.deployment = "";
+					} catch( any e ) {
+						try {
+							application.socketBox.serverClass = createObject('java', 'ortus.boxlang.web.MiniServer')
+							application.socketBox.WEBSOCKET_REQUEST_DETAILS = createObject('java', 'ortus.boxlang.web.handlers.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS;
+							application.socketBox.serverType = "boxlang-miniserver";
+						} catch( any e) {
+							throw( type="ServerTypeNotFound", message="This websocket library can only run in CommandBox or the BoxLang Miniserver." );
+						}
+					}
+				}
 			}
+		}
+		// This song and dance is because threads don't hvae access to the thread local variables to get the current deploy, so we want to capture it when we have a chance for later.
+		if( application.socketBox.serverType == "runwar" && isSimpleValue( application.socketBox.deployment ?: '' ) && !isNull( application.socketBox.serverClass.getCurrentExchange() ) ) {
+			application.socketBox.deployment = application.socketBox.serverClass.getCurrentExchange().getAttachment( application.socketBox.SITE_DEPLOYMENT_KEY );
 		}
 	}
 	

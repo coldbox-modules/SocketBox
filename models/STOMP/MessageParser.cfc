@@ -2,7 +2,9 @@
  * A simple STOMP message parser.
  */
 component {
-	
+	// Adobe CF and Lucee stupidly return an empty string for chr(0), so we can't use that
+	// This workaround seems to work on all 3 engines.
+	variables.NULL_BYTE = URLDecode( "%00" );
 	/**
 	 * Convert the STOMP message to a string.
 	 */
@@ -16,7 +18,7 @@ component {
 		for( var key in message.getHeaders() ) {
 			buffer.append( encode( key ) ).append( ":" ).append( encode( message.getHeaders()[ key ] ) ).append( chr(10) );
 		}
-		buffer.append( chr(10) ).append( body ).append( chr(0) );
+		buffer.append( chr(10) ).append( body ).append( NULL_BYTE );
 		return buffer.toString();
 	}
 
@@ -47,7 +49,7 @@ component {
 		var readBody = (numeric length=-1) => {
 			var body = "";
 			if( length == -1 ) {
-				while( message.charAt( position ) != chr(0) ) {
+				while( message.charAt( position ) != NULL_BYTE ) {
 					body &= message.charAt( position );
 					position++;
 					// If we've reached the end of the message, throw an error for missing null byte
@@ -65,7 +67,7 @@ component {
 				}
 			}
 			// validate we haven't reached the end of the message and the next char is a null byte
-			if( position >= len( message ) || message.charAt( position ) != chr(0) ) {
+			if( position >= len( message ) || message.charAt( position ) != NULL_BYTE ) {
 				throw( "Unexpected end of message after reading #length# bytes of body (missing null byte)" );
 			}
 			// Additional EOL chars are allowed after the null byte, so skip them
