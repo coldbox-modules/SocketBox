@@ -151,7 +151,7 @@ component {
 	 */
 	private function detectServerType() {
 		if( isNull( application.socketBox ) ) {
-			cflock( name="socketBox-init", type="exclusive", timeout=10 ) {
+			cflock( name="socketBox-init", type="exclusive", timeout=60 ) {
 				if( isNull( application.socketBox ) ) {
 					try {
 						application.socketBox.serverClass = createObject('java', 'runwar.Server')

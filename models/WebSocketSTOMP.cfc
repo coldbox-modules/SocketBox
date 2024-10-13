@@ -63,7 +63,7 @@ component extends="WebSocketCore" {
 		var config = application.STOMPBroker.config ?: configDefaults;
 
 		if( config.debugMode || !structKeyExists( application, "STOMPBroker" ) ) {
-			cflock( name="WebSocketBrokerInit", type="exclusive", timeout=10 ) {
+			cflock( name="WebSocketBrokerInit", type="exclusive", timeout=60 ) {
 				if( config.debugMode || !structKeyExists( application, "STOMPBroker" ) ) {
 					_configure();
 				}
@@ -205,7 +205,7 @@ component extends="WebSocketCore" {
 		var ack = message.getHeader( "ack", "auto" );
 		var subs = getSubscriptions();
 		if( !structKeyExists( subs, destination ) ) {
-			cflock( name="WebSocketSTOMP-STOMPSubscriptions-#destination#", type="exclusive", timeout=10 ) {
+			cflock( name="WebSocketSTOMP-STOMPSubscriptions-#destination#", type="exclusive", timeout=60 ) {
 				if( !structKeyExists( subs, destination ) ) {
 					subs[ destination ] = {};
 				}
@@ -225,7 +225,7 @@ component extends="WebSocketCore" {
 
 	private function registerInternalSubscription( required struct subs, required string subscriptionID, required string destination, required callback ) {		
 		if( !structKeyExists( subs, destination ) ) {
-			cflock( name="WebSocketSTOMP-STOMPSubscriptions-#destination#", type="exclusive", timeout=10 ) {
+			cflock( name="WebSocketSTOMP-STOMPSubscriptions-#destination#", type="exclusive", timeout=60 ) {
 				if( !structKeyExists( subs, destination ) ) {
 					subs[ destination ] = {};
 				}

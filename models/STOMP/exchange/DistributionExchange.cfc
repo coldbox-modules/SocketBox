@@ -35,7 +35,7 @@ component extends="BaseExchange" {
 		// Lock to ensure that the current destination is updated atomically
 		// Use application scope so we can maintain state even when in debug mode 
 		var exchangeName = "STOMProundRobin-#getProperty( "name" )#";
-		cflock( name="#exchangeName#", type="exclusive", timeout=5 ) {
+		cflock( name="#exchangeName#", type="exclusive", timeout=60 ) {
 			application[ exchangeName ] = application[ exchangeName ] ?: 0;
 			if( application[ exchangeName ] == 0 ) {
 				application[ exchangeName ] = 1;
