@@ -28,5 +28,5 @@
     "shortDescription":"WebSocket Listener library",
     "slug":"socketbox",
     "type":"modules",
-    "version":"1.2.0"
+    "version":"1.2.1"
 }
