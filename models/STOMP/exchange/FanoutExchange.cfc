@@ -3,6 +3,9 @@
  */
 component extends="BaseExchange" {
 	
+	/**
+	 * Find the matching binding and send the message to ALL the destinations
+	 */
 	function routeMessage( required WebSocketSTOMP STOMPBroker, required string destination, required any message ) {
 		var bindings = getProperty( "bindings", {} );
 		for( var routingKey in bindings ) {
