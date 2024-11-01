@@ -19,7 +19,7 @@ CommandBox allows for the following config:
 * The URI the websockets listener will listen on.  Default is `/ws` so if your site is `foobar.com` then your JS code in the browser will connect to `foobar.com/ws`.  Configure under `web.websocket.uri` for all sites and for an individual site under `sites.mySite.websocket.uri`.  You can use the root URI of `/` but you may have issues setting up websocket proxying if you have a web server in front.
 * The publicly accessible remote class (cfc or bx) to respond to incoming websocket messages.  Default is `/WebSocket.cfc` in the web root,  Configure for all sites with `web.websocket.listener` and for an individual site under `sites.mySite.websocket.listener`.
 
-#Usage 
+# Usage 
 
 SocketBox has two usage modes.  Out of the box, there is just basic websocket support that is very simple for you to build whatever you want on top of.  
 There is also a STOMP broker built on top of the core functionality you can tap into by extending a different CFC.
