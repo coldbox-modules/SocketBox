@@ -98,7 +98,7 @@ You can use a JS WebSocket library, but modern browsers have everything you need
 
 ## STOMP Broker
 
-If you want more power, you can use our STOMP broker.  STOMP stands for Simple Text Orientated Messaging Protocol and provides semantics for
+If you want more power, you can use our STOMP broker.  STOMP stands for Simple Text Oriented Messaging Protocol and provides semantics for
 
 * message format/serialization
 * authentication/authorizing
@@ -114,9 +114,9 @@ To use STOMP WebSocket support, you'll want to extend the `modules.socketbox.mod
 
 It adds the following methods you can override in your custom `WebSocket.cfc`.
 
-* `configure()` - You can configure the STOMP broker via a struct retured from this method (see below)
+* `configure()` - You can configure the STOMP broker via a struct returned from this method (see below)
 * `authenticate( required string login, required string passcode, string host, required channel )` - Allows custom authentication logic to accept or deny a STOMP connect request. Note a STOMP connect message is different from a low level WebSocket connection.
-* `authorize( required string login, required string exchange, required string destination, required string access, required channel )` - Allows custom authorization logic to allow or deny a client from being able to subscribe to a destination or pubish to a destination.
+* `authorize( required string login, required string exchange, required string destination, required string access, required channel )` - Allows custom authorization logic to allow or deny a client from being able to subscribe to a destination or publish to a destination.
 * `onSTOMPConnect( required message, required channel )` - Called when a STOMP client connects.  Typically you don't need to override this
 * `onSTOMPDisconnect( required message, required channel )` - Called when a STOMP client disconnects.  Typically you don't need to override this
 
