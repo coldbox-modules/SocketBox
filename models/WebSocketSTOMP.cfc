@@ -483,6 +483,8 @@ component extends="WebSocketCore" {
 		var parsedDest = parseDestination( destination );
 		var exchanges = getExchanges();
 		if( structKeyExists( exchanges, parsedDest.exchange ) ) {
+			// add the publisher-id to the message header, send as 0 if not present ( server side )
+			message.setHeader( "publisher-id", message.getChannel().hashCode() ?: 0 );
 			exchanges[ parsedDest.exchange ].routeMessage( this, parsedDest.destination, message );
 		}
 	}
