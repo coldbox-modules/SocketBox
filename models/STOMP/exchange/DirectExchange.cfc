@@ -1,5 +1,5 @@
 /**
- * Direct STOMP exchange.  Will route messages directly 
+ * Direct STOMP exchange.  Will route messages directly
  */
 component extends="BaseExchange" {
 
@@ -30,10 +30,8 @@ component extends="BaseExchange" {
 		// Check for custom bindings
 		var bindings = getProperty( "bindings", {} );
 		if( structKeyExists( bindings, destination ) ) {
-			bindings[ destination ].each( function( bindingID, binding ) {
-				// This will match an exchange and process again from the top
-				STOMPBroker.routeMessage( destination, message )
-			} );
+			// This will match an exchange and process again from the top
+			STOMPBroker.routeMessage( bindings[ destination ], message );
 		}
 
 	}
