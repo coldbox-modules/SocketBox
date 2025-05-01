@@ -78,7 +78,7 @@ component {
 		var line = readNextLine();
 		while( line != "" ) {
 			var header = listToArray( line, ":" );
-			headers[ decode( header[ 1 ] ) ] = decode( header[ 2 ] );
+			headers[ decode( header[ 1 ] ) ] = decode( header[ 2 ] ?: "" );
 			line = readNextLine();
 		};
 		// if we reached here, we've hit the double line break after the headers, or the end of the message
