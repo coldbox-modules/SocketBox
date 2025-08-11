@@ -1,5 +1,8 @@
 {
     "author":"Brad Wood",
+    "dependencies":{
+        "cbproxies":"^1.7.0+8"
+    },
     "description":"WebSocket Listener library to be used with CommandBox Websocket and BoxLang WebSocket server.",
     "documentation":"https://forgebox.io/view/socketbox",
     "homepage":"https://forgebox.io/view/socketbox",
@@ -8,6 +11,9 @@
         "/test/",
         "/tests/"
     ],
+    "installPaths":{
+        "cbproxies":"models/cluster/cbproxies/"
+    },
     "license":[
         {
             "type":"Apache 2.0",

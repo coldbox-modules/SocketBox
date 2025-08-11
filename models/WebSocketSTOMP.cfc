@@ -10,7 +10,7 @@
  */
 component extends="WebSocketCore" {
 
-	variables.configDefaults = {
+	variables.STOMPconfigDefaults = {
 		"heartBeatMS" : 10000,
 		"debugMode" : false,
 		"exchanges" : {
@@ -61,31 +61,11 @@ component extends="WebSocketCore" {
 	};
 
 	/**
-	 * Called every request internally to ensure the broker is configured
+	 * Check if the WebSocket core has been initialized
+	 * @return boolean
 	 */
-	function reloadCheck() {
-		try {
-		// This may just be defaults right now
-		var config = application.STOMPBroker.config ?: configDefaults;
-
-		if( config.debugMode || !structKeyExists( application, "STOMPBroker" ) ) {
-			cflock( name="WebSocketBrokerInit", type="exclusive", timeout=60 ) {
-				if( config.debugMode || !structKeyExists( application, "STOMPBroker" ) ) {
-					_configure();
-				}
-			}
-		}
-		} catch( any e ) {			
-			println( e );
-		}
-	}
-
-	/**
-	 * Intercept this core method to insert our reload check
-	 */
-	remote function onProcess() {
-		reloadCheck();
-		super.onProcess( argumentCollection=arguments );
+	boolean function isInitted() {
+		return super.isInitted() && structKeyExists( application, "STOMPBroker" );
 	}
 
 	/**
@@ -368,14 +348,6 @@ component extends="WebSocketCore" {
 	}
 
 	/**
-	 * Get the current configuration
-	 */
-	function getConfig() {
-		reloadCheck();
-		return application.STOMPBroker.config;
-	}
-
-	/**
 	 * Get the connection details for a given channel
 	 *
 	 * @channel The channel to get the connection details for
@@ -401,9 +373,13 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Internal configuration.
-	 * Do not call an methods inside here that call reloadChecks() or you'll get a stack overflow!
+	 * Do not call any methods inside here that call reloadChecks() or you'll get a stack overflow!
 	 */
-	function _configure() {
+	Struct function _configure() {
+		// Setup core config
+		var config = super._configure();
+
+		// Add STOMP specific config
 		application.STOMPBroker = {
 			WebSocketSTOMPMethodParser = new STOMP.MessageParser(),
 			// Don't blow away subscriptions if debugmode is on
@@ -411,16 +387,9 @@ component extends="WebSocketCore" {
 			STOMPExchanges = {},
 			// Don't blow away connections if debugmode is on
 			STOMPConnections = application.STOMPBroker.STOMPConnections ?: {},
-			config = configDefaults
 		};
-		var config = configure();
-		// Add in defaults
-		config.append( configDefaults, false );
+		
 
-		if( !structKeyExists( local, "config" ) || !isStruct( local.config ) ) {
-			throw( type="InvalidConfiguration", message="WebSocket STOMP configure() method must return a struct" );
-		}
-		application.STOMPBroker.config = local.config;
 		var exchanges = application.STOMPBroker.STOMPExchanges;
 		exchanges[ "direct" ] = new STOMP.exchange.DirectExchange({});
 		config.exchanges = config.exchanges ?: {};
@@ -452,14 +421,7 @@ component extends="WebSocketCore" {
 			registerInternalSubscription( application.STOMPBroker.STOMPSubscriptions, subscriptionID, destination, callback )
 		} );
 		
-	}
-
-	/**
-	 * Override this method to configure the STOMP broker
-	 */
-	function configure() {
-		// Override me
-		return configDefaults;
+		return config;
 	}
 
 	/**
