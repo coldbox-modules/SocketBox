@@ -21,6 +21,11 @@ component accessors="true" {
 	property name="delaySeconds" type="numeric";
 
 	/**
+	 * The tick count when the next run should occur
+	 */
+	property name="nextRunTick" type="numeric";
+
+	/**
 	 * The last time the peer connections were modified
 	 */
 	property name="lastUpdateTick" type="numeric";
@@ -57,13 +62,26 @@ component accessors="true" {
 	property name="myPeerName" type="string";
 
 	/**
+	 * The number of seconds after which a peer is considered expired.
+	 * If a peer has not checked in within this time, it is elligible for removal.
+	 */
+	property name="peerTimeout" type="numeric";
+
+	/**
+	 * Copy of config to prevent circular references during startup
+	 */
+	property name="config" type="struct";
+
+	/**
 	 * Constructor
 	 * @socketBox The SocketBox instance to use for cluster management
 	 * @config The configuration for the SocketBox instance.  This is mostly to avoid circular references. during startup.
 	 * @return The ClusterManager instance
 	 */
 	function init( required any socketBox, required struct config ) {
+		variables.config = config;
 		variables.clusterManagerKey = createUUID();
+		variables.peerTimeout = 60;
 		variables.socketBox = socketBox;
 		variables.peerConnections = {};
 		variables.lastUpdateTick = getTickCount();
@@ -97,23 +115,69 @@ component accessors="true" {
 		thread name="SocketBoxClusterManager" action="run" {
 			cfsetting( requesttimeout=9999999999 );
 			systemOutput( "SocketBox cluster manager thread started." );
+			sleep( variables.delaySeconds * 1000 );
+
 			// If the application has restarted and we are no longer the current manager, then this thread is done
+			var updated = false;
 			while( (server.socketBoxManagers[socketBox.getSocketBoxKey()] ?: '') == variables.clusterManagerKey ) {
 				try {
-					// Check for peer connections every delaySeconds
-					sleep( variables.delaySeconds * 1000 );
-					if( (server.socketBoxManagers[socketBox.getSocketBoxKey()] ?: '') == variables.clusterManagerKey ) {
+					updated = false;
+					updateCacheLastCheckin();
+					if( nextRunTick <= getTickCount() ) {
+						updated = true;
 						systemOutput("Checking SocketBox cluster peers after " & variables.delaySeconds & " seconds...");
 						checkPeers();
 					}
+					// Check for peer connections every delaySeconds
+					sleep( 2000 );
 				} catch( any e ) {
 					systemOutput("SocketBox error in SocketBox cluster manager: " & e.message);
 				} finally {
-					recalcUpdateDelay();
+					if( updated ) {
+						recalcUpdateDelay();
+					}
 				}
 			}
 			systemOutput( "SocketBox cluster manager thread stopped." );
 		}
+	}
+
+	/**
+	 * Mark the last checkin time in the cache provider
+	 */
+	function updateCacheLastCheckin() {
+		if( !hasCacheProvider() ) {
+			return;
+		}
+		var cacheKey = cacheKeyPrefix & "-" & myPeerName;
+		variables.cacheProvider.set( cacheKey, getEpochSeconds() );
+	}
+
+	/**
+	 * Get the current epoch seconds
+	 * This is used to store the last checkin time in the cache provider
+	 */
+	function getEpochSeconds() {	
+		return dateDiff("s", createDateTime(1970,1,1,0,0,0), now());
+	}
+
+	/**
+	 * Check for expired peers in the cache and remove them
+	 */
+	function reapExpiredCachePeers() {
+		if( !hasCacheProvider() ) {
+			return;
+		}
+		getCachePeers().each( (cachePeer)=>{
+			// Get this every time so it's fresh
+			var nowEpochSeconds = getEpochSeconds();
+			var lastCheckin = val( variables.cacheProvider.get( cacheKeyPrefix & "-" & cachePeer ) ?: '' );
+			if( lastCheckin < ( nowEpochSeconds - variables.peerTimeout ) ) {
+				// This peer has timed out
+				systemOutput( "Removing expired peer from cache: " & cachePeer );
+				removedPeerFromCache( cachePeer );	
+			}
+		} );
 	}
 
 	/**
@@ -124,8 +188,9 @@ component accessors="true" {
 		// make sure we're registered as a peer in the cache
 		if( hasCacheProvider() ) {
 			ensureMyselfInCache();
-		}
 
+			reapExpiredCachePeers();
+		}
 		var currentPeers = getPeers();
 		// Disconnect from any peers we no longer have configured
 		variables.peerConnections.each( (peerName, peer)=>{
@@ -151,7 +216,7 @@ component accessors="true" {
 	 * Get the list of configured cluster peers
 	 */
 	function getPeers() {
-		var peers = duplicate( socketBox.getConfig().cluster.peers ?: [] );
+		var peers = duplicate( config.cluster.peers ?: [] );
 		
 		peers.append( getCachePeers(), true );
 		// Filter out our own name if present
@@ -197,6 +262,7 @@ component accessors="true" {
 	 * @return true if we added successfully or were already present, false if we failed to add ourselves
 	 */
 	function ensureMyselfInCache( numeric attempts=5 ) {
+		updateCacheLastCheckin();
 		var cachedPeers = "";
 		var i = 1;
 		while ( i <= attempts ) {
@@ -208,7 +274,7 @@ component accessors="true" {
 			// Add ourselves
 			cachedPeers = cachedPeers.listAppend( myPeerName, chr(13) & chr(10) );
 			systemOutput("SocketBox added itself to cache attempt #i#." );
-			variables.cacheProvider.put( cacheKeyPrefix, cachedPeers );
+			variables.cacheProvider.set( cacheKeyPrefix, cachedPeers );
 
 			// Pause 1-3 seconds to allow for other in-process writes to complete
 			sleep( randRange( 1000, 3000 ) );
@@ -227,6 +293,9 @@ component accessors="true" {
 	 * 
 	 */
 	function removedPeerFromCache( required string peerName, numeric attempts=5 ) {
+		var cacheKey = cacheKeyPrefix & "-" & peerName;
+		variables.cacheProvider.clear( cacheKey );
+
 		var cachedPeers = "";
 		var i = 1;
 		while ( i <= attempts ) {
@@ -239,7 +308,7 @@ component accessors="true" {
 			var peersArray = cachedPeers.listToArray( chr(13) & chr(10) ).filter( (peer) => trim(peer) != peerName );
 			cachedPeers = peersArray.toList( chr(13) & chr(10) );
 			systemOutput("SocketBox removed peer [#peerName#] from cache attempt #i#." );
-			variables.cacheProvider.put( cacheKeyPrefix, cachedPeers );
+			variables.cacheProvider.set( cacheKeyPrefix, cachedPeers );
 
 			// Pause 1-3 seconds to allow for other in-process writes to complete
 			sleep( randRange( 1000, 3000 ) );
@@ -287,7 +356,7 @@ component accessors="true" {
 				// Authorization header
 				.header(
 					"socketbox-management",
-					socketbox.getConfig().cluster.secretKey
+					config.cluster.secretKey
 				)
 				// For self-identification
 				.header(
@@ -408,6 +477,7 @@ component accessors="true" {
 		} else {
 			variables.delaySeconds = 60 + random;
 		}
+		nextRunTick = getTickCount() + (variables.delaySeconds * 1000);
 	}
 
 	/**

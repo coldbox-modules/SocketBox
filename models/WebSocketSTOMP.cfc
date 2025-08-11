@@ -64,8 +64,8 @@ component extends="WebSocketCore" {
 	 * Check if the WebSocket core has been initialized
 	 * @return boolean
 	 */
-	boolean function isInitted() {
-		return super.isInitted() && structKeyExists( application, "STOMPBroker" );
+	boolean function isInitted( required Struct config ) {
+		return super.isInitted( config ) && structKeyExists( application, "STOMPBroker" );
 	}
 
 	/**
@@ -318,9 +318,9 @@ component extends="WebSocketCore" {
 	/**
 	 * Send a message from the server side to all subscribers of a destination
 	 */
-	function send( required string destination, required any messageData, struct headers={} ) {
+	function send( required string destination, required any messageData, struct headers={}, boolean rebroadcast=true ) {
 		reloadCheck();		
-		routeMessage( destination, newMessage("SEND", headers, messageData ) );
+		routeMessage( destination, newMessage("SEND", headers, messageData ), rebroadcast );
 	}
 
 	/**
@@ -376,50 +376,60 @@ component extends="WebSocketCore" {
 	 * Do not call any methods inside here that call reloadChecks() or you'll get a stack overflow!
 	 */
 	Struct function _configure() {
-		// Setup core config
-		var config = super._configure();
+		try {
+			// Setup core config
+			var config = super._configure();
+			
+			mergeData( config, variables.STOMPconfigDefaults );
 
-		// Add STOMP specific config
-		application.STOMPBroker = {
-			WebSocketSTOMPMethodParser = new STOMP.MessageParser(),
-			// Don't blow away subscriptions if debugmode is on
-			STOMPSubscriptions = application.STOMPBroker.STOMPSubscriptions ?: {},
-			STOMPExchanges = {},
-			// Don't blow away connections if debugmode is on
-			STOMPConnections = application.STOMPBroker.STOMPConnections ?: {},
-		};
-		
+			// Add STOMP specific config
+			application.STOMPBroker = {
+				WebSocketSTOMPMethodParser = new STOMP.MessageParser(),
+				// Don't blow away subscriptions if debugmode is on
+				STOMPSubscriptions = application.STOMPBroker.STOMPSubscriptions ?: {},
+				STOMPExchanges = {},
+				// Don't blow away connections if debugmode is on
+				STOMPConnections = application.STOMPBroker.STOMPConnections ?: {},
+			};
+			
 
-		var exchanges = application.STOMPBroker.STOMPExchanges;
-		exchanges[ "direct" ] = new STOMP.exchange.DirectExchange({});
-		config.exchanges = config.exchanges ?: {};
-		exchanges.append( config.exchanges.map( (name,props)=>{
-			props = duplicate( props );
-			props.class = v.class ?: name;
-			props.name = name;
-			switch(props.class) {
-				case "direct":
-					return new STOMP.exchange.DirectExchange( properties=props );
-				case "topic":
-					return new STOMP.exchange.TopicExchange( properties=props );
-				case "fanout":
-					return new STOMP.exchange.FanoutExchange( properties=props );
-				case "distribution":
-					return new STOMP.exchange.DistributionExchange( properties=props );
-				default:
-					// struct key should be fqn to a CFC
-					return createObject( "component", props.class ).init( properties=props )
-			}
-		} ) );
+			var exchanges = application.STOMPBroker.STOMPExchanges;
+			exchanges[ "direct" ] = new STOMP.exchange.DirectExchange({});
+			config.exchanges = config.exchanges ?: {};
+			exchanges.append( config.exchanges.map( (name,props)=>{
+				props = duplicate( props );
+				props.class = v.class ?: name;
+				props.name = name;
+				switch(props.class) {
+					case "direct":
+						return new STOMP.exchange.DirectExchange( properties=props );
+					case "topic":
+						return new STOMP.exchange.TopicExchange( properties=props );
+					case "fanout":
+						return new STOMP.exchange.FanoutExchange( properties=props );
+					case "distribution":
+						return new STOMP.exchange.DistributionExchange( properties=props );
+					default:
+						// struct key should be fqn to a CFC
+						return createObject( "component", props.class ).init( properties=props )
+				}
+			} ) );
 
-		// re-create internal subscriptions
-		removeAllInternalSubscriptions(application.STOMPBroker.STOMPSubscriptions);
-		config.subscriptions = config.subscriptions ?: {};
-		var subCounter = 0;
-		config.subscriptions.each( (destination, callback)=>{
-			var subscriptionID = "internal-" & subCounter++;
-			registerInternalSubscription( application.STOMPBroker.STOMPSubscriptions, subscriptionID, destination, callback )
-		} );
+			// re-create internal subscriptions
+			removeAllInternalSubscriptions(application.STOMPBroker.STOMPSubscriptions);
+			config.subscriptions = config.subscriptions ?: {};
+			var subCounter = 0;
+			config.subscriptions.each( (destination, callback)=>{
+				var subscriptionID = "internal-" & subCounter++;
+				registerInternalSubscription( application.STOMPBroker.STOMPSubscriptions, subscriptionID, destination, callback )
+			} );
+
+		} catch( any e ) {
+			systemOutput( "SocketBox STOMP error during configuration: " & e.message );
+			// Remove any config we created so we don't leave SocketBox in a corrupted state
+			application.delete( 'STOMPBroker' );
+			rethrow;
+		} 
 		
 		return config;
 	}
@@ -441,13 +451,24 @@ component extends="WebSocketCore" {
 	 * @destination The destination to route the message to in the format exchange/destination
 	 * @message The message to route
 	 */
-	function routeMessage( required string destination, required Message message ) {
+	function routeMessage( required string destination, required Message message, boolean rebroadcast=true ) {
 		var parsedDest = parseDestination( destination );
 		var exchanges = getExchanges();
 		if( structKeyExists( exchanges, parsedDest.exchange ) ) {
 			// add the publisher-id to the message header, send as 0 if not present ( server side )
-			message.setHeader( "publisher-id", message.getChannel().hashCode() ?: 0 );
+			if( !isNull( message.getChannel() ) ) {
+				message.setHeader( "publisher-id", message.getChannel().hashCode() ?: 0 );
+			}
 			exchanges[ parsedDest.exchange ].routeMessage( this, parsedDest.destination, message );
+		}
+		if( rebroadcast && isClusterEnabled() ) {
+			var serializedMessageData = serializeJSON( {
+				"destination" : destination,
+				"messageData" : message.getBody(),
+				"headers" : message.getHeaders()
+			} );
+
+			broadcastManagementMessage( '__STOMP_message_rebroadcast__' & serializedMessageData );
 		}
 	}
 
@@ -578,6 +599,41 @@ component extends="WebSocketCore" {
 				}
 			}
 		}
+	}
+
+	
+
+	/**
+	 * A new incoming Management message has been received.  Don't override this method.
+	 */
+	private function _onManagementMessage( required message, required channel ) {
+		if( application.socketBoxClusterManagement.selfChannels.keyExists( channel.hashcode() ) ) {
+			// Ignore messages from myself
+			return;
+		}
+
+		var messageText = message;
+		// Backwards compat for first iteration of websocket listener
+		if( !isSimpleValue( messageText ) ) {
+			messageText = message.getData();
+		}
+
+		// If a message has come in for STOMP rebroadcast, then funnel it into the send() logic for processing
+		if( left( messageText, 29 ) == '__STOMP_message_rebroadcast__' ) {
+			var serializedMessageData = messageText.right( -29 );
+			var messageData = deserializeJSON( serializedMessageData );
+			send(
+				messageData.destination,
+				messageData.messageData,
+				messageData.headers,
+				false // Don't rebroadcast this message
+			);			
+		}
+		
+		super._onManagementMessage(
+			messageText,
+			channel
+		);
 	}
 
 }

@@ -117,8 +117,8 @@ It adds the following methods you can override in your custom `WebSocket.cfc`.
 * `configure()` - You can configure the STOMP broker via a struct returned from this method (see below)
 * `authenticate( required string login, required string passcode, string host, required channel )` - Allows custom authentication logic to accept or deny a STOMP connect request. Note a STOMP connect message is different from a low level WebSocket connection.
 * `authorize( required string login, required string exchange, required string destination, required string access, required channel )` - Allows custom authorization logic to allow or deny a client from being able to subscribe to a destination or publish to a destination.
-* `onSTOMPConnect( required message, required channel )` - Called when a STOMP client connects.  Typically you don't need to override this
-* `onSTOMPDisconnect( required message, required channel )` - Called when a STOMP client disconnects.  Typically you don't need to override this
+* `onSTOMPConnect( required message, required channel )` - Called when a STOMP client connects.  Typically, you don't need to override this
+* `onSTOMPDisconnect( required message, required channel )` - Called when a STOMP client disconnects.  Typically, you don't need to override this
 
 Additionally, the following public methods are available to you to call anywhere in your app.  Simply create an instance of your WebSocket class and call them.
 
@@ -235,7 +235,7 @@ Here are the exchange types and their config.
 * `<path.to.custom.CFC>` - Provide the mapping path to a CFC that extends `modules.socketbox.models.STOMP.exchange.BaseExchange` and implement your own `routeMessage( required WebSocketSTOMP STOMPBroker, required string destination, required any message )`.  You can decide whatever logic you want to find the matching subscriptions or STOMP connections you wish to send to.
   * Config is entirely chosen by you!  Whatever struct of properties you declare in the config will be passed to your CFC's `init()` method.  Acess any property inside the exchange via the `getProperty( required string key, any defaultValue )` method.
 
-### Server Side listners
+### Server Side listeners
 
 If you want to listen to messages with server-side code, specify as many `subscriptions` in the config, which consist of a function that will be executed every time a message is routed to your listener.  Your function will receive the `message` as its only argument and you can run whatever code you wish.  Get the original channel that send the message via `message.getChannel()`, but note, this will be null if the message was send from server-side code and not a WebSocket client.
 

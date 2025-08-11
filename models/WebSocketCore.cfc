@@ -22,14 +22,14 @@ component {
 			// an INTERNAL address and/or port that the other servers in the cluster can connect to directly which doesn't flow through the proxy.
 			// Defaults to the server's hostname and the HTTP port in use.
 			"myAddress" : "",
-			// Instance of a cache provder which supports the get() and put() methods.
+			// Instance of a cache provder which supports the get(), set(), and clear() methods.
 			// This is used to store the cluster state and is required for cluster mode to work
 			"cacheProvider" : "",
 			// Hard-coded list of cluster peers to connect to. These are always used regardless of external cache.
 			"peers" : [],
-			// A class or object with MINIMUM get() and put() methods to use as a cache provider.
+			// A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
 			// A CacheBox provider is perfect for this and offers disk, JDBC, CF/Lucee, Couchbase, Redis, or Memcached backends.
-			// You can also provide your own custom cache provider as long as it has get() and put() methods.
+			// You can also provide your own custom cache provider as long as it has get(), set(), and clear() methods.
 			// Note, get() must return null if the key is not found.
 			// ALL nodes in the cluster MUST share the same external data store.  This cache will be used for registration and discovery of the other nodes in the cluster
 			"cacheProvider" : "",
