@@ -15,16 +15,11 @@ component {
 			"enable" : false,
 			// THis can be any string-- a GUID is fine.  Just generate it once and ensure all servers in the cluster use the same secret key.
 			"secretKey" : "",
-			// Useful for debugging.  Unique name for this server in the cluster.  Defaults to hostname.
-			"name" : "ws://#cgi.HTTP_HOST#/ws",
 			// The address for OTHER servers in the cluster to connect to this server.  It needs to be accessible by other servers in the cluster and 
 			// should use the HTTP port that the server is listening on.  Note, if this server is behind a proxy or load balancer, you need to provide
 			// an INTERNAL address and/or port that the other servers in the cluster can connect to directly which doesn't flow through the proxy.
 			// Defaults to the server's hostname and the HTTP port in use.
-			"myAddress" : "",
-			// Instance of a cache provder which supports the get(), set(), and clear() methods.
-			// This is used to store the cluster state and is required for cluster mode to work
-			"cacheProvider" : "",
+			"name" : "ws://#cgi.HTTP_HOST#/ws",
 			// Hard-coded list of cluster peers to connect to. These are always used regardless of external cache.
 			"peers" : [],
 			// A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
@@ -85,7 +80,7 @@ component {
 	/**
 	 * Detect if an incoming connection is a management connection based on the original HTTP headers.
 	 * 
-	 * @param exchange The current exchange
+	 * @exchange The current exchange
 	 * @return boolean True if this is a management connection, false otherwise
 	 */
 	function isManagementConnection( required any exchange, required any channel ) {
@@ -389,8 +384,125 @@ component {
 			application.socketBoxClusterManagement.clusterManager.ensurePeer( messageText.right( -19 ) );
 		}
 
+		// If we've received an RPC request.  Let's process it, and reply
+		if( left( messageText, 15 ) == '__rpc_request__' ) {
+			var rpcData = deserializeJSON( messageText.right( -15 ) );
+			try {
+				_onRPCRequest( argumentCollection=rpcData ) ;
+			} catch( any e ) {
+				return sendRPCResponse( rpcData.id, rpcData.peerName, "", false, e );
+			}
+		}
+
+		// If we've received an RPC response, then pass it to the cluster manager to be reunited with the original request		
+		if( left( messageText, 16 ) == '__rpc_response__' ) {
+			application.socketBoxClusterManagement.clusterManager.onRPCResponse( messageText.right( -16 ) );
+		}
+
 		onManagementMessage( messageText, channel );
 	}
+
+	/**
+	 * Convenience method to send an RPC request to a specific peer in the cluster.
+	 * @peerName The name of the peer to send the request to
+	 * @operation The operation to call on the peer
+	 * @args The arguments to pass to the operation
+	 * @timeoutSeconds The number of seconds to wait for a response (default is 15 seconds)
+	 * @defaultValue The default value to return if the request times out or fails
+	 * @return The response from the peer, or the default value if the request fails or times out
+	 */
+	function RPCRequest( required string peerName, required string operation, struct args={}, numeric timeoutSeconds=15, any defaultValue ) {
+		if( !isClusterEnabled() ) {
+			throw( type="ClusterDisabled", message="Cluster mode is not enabled. Cannot send RPC request." );
+		}
+		return application.socketBoxClusterManagement.clusterManager.RPCRequest( argumentCollection=arguments );
+	}
+	
+	/**
+	 * Send RPC request to all connected peers in the cluster
+	 */
+	function RPCClusterRequest( required string operation, struct args={}, numeric timeoutSeconds=15, any defaultValue ) {
+		if( !isClusterEnabled() ) {
+			throw( type="ClusterDisabled", message="Cluster mode is not enabled. Cannot send RPC request." );
+		}
+		var theArguments = arguments;
+		return application.socketBoxClusterManagement.clusterManager.getPeerConnections()
+			.map( (peerName,peerConnection) => {
+				try {
+					return application.socketBoxClusterManagement.clusterManager.RPCRequest( peerName=peerConnection.getPeerName(), argumentCollection=theArguments );
+				} catch( any e ) {
+					return {
+						"success" : false,
+						"error" : e,
+						"result" : ""
+					};
+				}
+			}, false );
+	}
+
+	/**
+	 * A new incoming RPC request has been received.  Allow the backend to claim it before a user-specified method is called.
+	 * Return true if the request was handled, false otherwise.
+	 * 
+	 * @operation The operation to call on the peer
+	 * @args The arguments to pass to the operation
+	 * @id The unique ID of the request
+	 * @peerName The name of the peer that sent the request
+	 * 
+	 * @return boolean True if the request was handled, false otherwise
+	 */
+	Boolean function _onRPCRequest( required string operation, required struct args, required string id, required string peerName ) {
+		switch( operation ) {
+			case "uptime" :
+				return sendRPCResponse( id, peerName, int( application.socketBoxClusterManagement.clusterManager.getStartTick()/1000 ) );
+		}
+		if( !onRPCRequest( operation, args, id, peerName ) ) {
+			throw( type="RPCNotImplemented", message="Unknown RPC request received. Operation: [#operation#]" );
+		}
+	}
+
+	/**
+	 * A new incoming RPC request has been received.  Override this method to handle RPC requests.
+	 * This method should return a boolean indicating whether the request was handled or not.
+	 * 
+	 * @operation The operation to call on the peer
+	 * @args The arguments to pass to the operation
+	 * @id The unique ID of the request
+	 * @peerName The name of the peer that sent the request
+	 * 
+	 * @return boolean True if the request was handled, false otherwise
+	 */
+	Boolean function onRPCRequest( required string operation, required struct args, required string id, required string peerName ) {
+		// Override me to implement more RPC operations
+	}
+
+	/**
+	 * Use me to send an RPC response back to a peer
+	 * @id The unique ID of the request
+	 * @peerName The name of the peer to send the response to
+	 * @response The response to send back
+	 * 
+	 * @return Boolean True if the response was sent successfully.
+	 */
+	Boolean function sendRPCResponse( required string id, required string peerName, any response, boolean success=true, any error={} ) {
+		if( !isClusterEnabled() ) {
+			throw( type="ClusterDisabled", message="Cluster mode is not enabled. Cannot send RPC response." );
+		}
+		application.socketBoxClusterManagement.clusterManager.ensurePeer( peerName );
+		var data = {
+			"id" : id,
+		 	"result" : response,
+			"success" : success,
+			"error" : error
+		};
+		var message = '__rpc_response__' & serializeJSON( data );
+		var peer = application.socketBoxClusterManagement.clusterManager.getPeerConnections()[ peerName ] ?: '';
+		if( !isSimpleValue( peer ) ) {
+			peer.sendText( message );
+		}		
+		return true;
+	}
+
 
 	/**
 	 * A new incoming Management message has been received.  Override this method.
@@ -420,7 +532,7 @@ component {
 			// which we track manually.
 			getAllConnections().each( (channel) => {
 				sendMessage( message=message, channel=channel );
-			} );
+			}, true );
 			if( rebroadcast ) {
 				broadcastManagementMessage( '__message_rebroadcast__' & message );
 			}
@@ -441,7 +553,7 @@ component {
 			.filter( (peerConnection) => peerConnection.getPeerName() != excludePeer )
 			.each( (peerConnection) => {
 				peerConnection.sendText( message );
-			} );
+			}, true );
 	}
 
 	/**********************************

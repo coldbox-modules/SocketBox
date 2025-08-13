@@ -62,6 +62,16 @@ component accessors="true" {
 	property name="myPeerName" type="string";
 
 	/**
+	 * Cluster RPC operations
+	 */
+	property name="RPCOperations" type="struct";
+
+	/**
+	 * Start tickount
+	 */
+	property name="startTick" type="numeric";
+
+	/**
 	 * The number of seconds after which a peer is considered expired.
 	 * If a peer has not checked in within this time, it is elligible for removal.
 	 */
@@ -79,6 +89,7 @@ component accessors="true" {
 	 * @return The ClusterManager instance
 	 */
 	function init( required any socketBox, required struct config ) {
+		variables.startTick = getTickCount();
 		variables.config = config;
 		variables.clusterManagerKey = createUUID();
 		variables.peerTimeout = 60;
@@ -86,6 +97,7 @@ component accessors="true" {
 		variables.peerConnections = {};
 		variables.lastUpdateTick = getTickCount();
 		variables.lockName = "socketbox-cluster-peer-lock-" & createUUID();
+		variables.jThread = createObject( "java", "java.lang.Thread" );
 		if( !isSimpleValue( config.cluster.cacheProvider ) ) {
 			variables.cacheProviderExists = true;
 			variables.cacheProvider = config.cluster.cacheProvider;
@@ -94,6 +106,7 @@ component accessors="true" {
 		}
 		variables.cacheKeyPrefix = "#config.cluster.cachePrefix#socketbox-cluster-peers";
 		variables.myPeerName = config.cluster.name;
+		RPCOperations={};
 		recalcUpdateDelay();
 
 		return this;
@@ -139,6 +152,7 @@ component accessors="true" {
 				}
 			}
 			systemOutput( "SocketBox cluster manager thread stopped." );
+			shutdownPeerConnections();
 		}
 	}
 
@@ -169,15 +183,22 @@ component accessors="true" {
 			return;
 		}
 		getCachePeers().each( (cachePeer)=>{
-			// Get this every time so it's fresh
-			var nowEpochSeconds = getEpochSeconds();
-			var lastCheckin = val( variables.cacheProvider.get( cacheKeyPrefix & "-" & cachePeer ) ?: '' );
-			if( lastCheckin < ( nowEpochSeconds - variables.peerTimeout ) ) {
+			if( isPeerExpired( cachePeer ) ) {
 				// This peer has timed out
 				systemOutput( "Removing expired peer from cache: " & cachePeer );
-				removedPeerFromCache( cachePeer );	
+				removedPeerFromCache( cachePeer );
 			}
 		} );
+	}
+
+	/**
+	 * Check if the peer is expired based on the last checkin time
+	 */
+	function isPeerExpired( required string cachePeer ) {
+		// Get this every time so it's fresh
+		var nowEpochSeconds = getEpochSeconds();
+		var lastCheckin = val( variables.cacheProvider.get( cacheKeyPrefix & "-" & cachePeer ) ?: '' );
+		return lastCheckin < ( nowEpochSeconds - variables.peerTimeout );
 	}
 
 	/**
@@ -204,7 +225,7 @@ component accessors="true" {
 			if( !peer.isConnectionOpen() ) {
 				removePeerConnection( peerName, false );
 			}
-		} );		
+		} );
 
 		// Connect to any new peers that are configured but not yet connected
 		currentPeers.each( (peerName)=>{
@@ -220,7 +241,11 @@ component accessors="true" {
 		
 		peers.append( getCachePeers(), true );
 		// Filter out our own name if present
-		return peers.filter( (peer)=>peer != myPeerName );
+		return peers
+			.toList( chr(10) )
+			.ListRemoveDuplicates( chr(10) )
+			.listToArray( chr(10) )
+			.filter( (peer)=> len( peer ) && peer != myPeerName );
 	}
 
 	/**
@@ -292,7 +317,7 @@ component accessors="true" {
 	 * @param attempts The number of attempts to remove the peer before giving up. Default is 5.
 	 * 
 	 */
-	function removedPeerFromCache( required string peerName, numeric attempts=5 ) {
+	function removedPeerFromCache( required string peerName, numeric attempts=3 ) {
 		var cacheKey = cacheKeyPrefix & "-" & peerName;
 		variables.cacheProvider.clear( cacheKey );
 
@@ -370,7 +395,7 @@ component accessors="true" {
 						[ "java.net.http.WebSocket$Listener" ]
 					)
 				)
-				.get(5, timeUnit.SECONDS) // Timeout after 10 seconds
+				.get(5, timeUnit.SECONDS)
 		} catch( any e ) {
 			systemOutput("Error connecting to cluster peer [#peerName#]: " & e.message);
 			return;
@@ -429,7 +454,14 @@ component accessors="true" {
 			removedPeerFromCache( myPeerName, 2 );
 		}
 
-		// Shut down all peer connections
+		shutdownPeerConnections();
+
+	}
+
+	/**
+	 * Shutdown all peer connections
+	 */
+	function shutdownPeerConnections() {
 		systemOutput("Shutting down [#peerConnections.count()#] management connections");
 		peerConnections.each( (peerName,clusterPeer)=>{
 			try {
@@ -446,6 +478,111 @@ component accessors="true" {
 	function clusterUpdated() {
 		variables.lastUpdateTick = getTickCount();
 		variables.delaySeconds = 2;
+	}
+
+	/**
+	 * Send an RPC request to a peer in the cluster.
+	 * This will block until the response is received or the timeout is reached.
+	 * @peerName The name of the peer to send the request to
+	 * @operation The name of the operation to call on the peer
+	 * @args The arguments to pass to the operation
+	 * @timeoutSeconds The number of seconds to wait for the response before timing out.
+	 * @defaultValue The value to return if the operation times out or fails
+	 * 
+	 * @return The result of the operation, or the default value if the operation times out
+	 */
+	function RPCRequest( required string peerName, required string operation, struct args={}, numeric timeoutSeconds=15, any defaultValue ) {
+		var peer = variables.peerConnections[peerName] ?: '';
+		if( isSimpleValue( peer ) ) {
+			if( !isNull( defaultValue ) ) {
+				return defaultValue;
+			} else {
+				throw( type="PeerNotFound", message="Peer [#peerName#] not found in cluster." );
+			}
+		}
+		var RPCID = createUUID();
+		var message = serializeJSON( {
+			"operation" : operation,
+			"peerName" : getMyPeerName(),
+			"args" : args,
+			"id" : RPCID
+		} );
+
+		// Setup the container to hold the RPC operation state
+		RPCOperations[RPCID] = {
+			"done" : false,
+			"thread" : "",
+			"result" : "",
+			"startTick" : getTickCount(),
+			// Used below to detect race conditions
+			"original" : true
+		};
+		// Fire off the RPC message to the peer
+		peer.sendText( '__rpc_request__' & message );
+		// Start up a thread to wait for the RPC response
+		// This thread will be interrupted when the RPC response is received
+		// or will timeout after the specified number of seconds.
+		var threadName = "rpc_waiter_" & RPCID;
+		cfthread( name=threadName, action="run", RPCID="#RPCID#", timeoutSeconds="#timeoutSeconds#") {
+			// Set our current thread so the response can interrupt us
+			RPCOperations[RPCID].thread = jThread.currentThread();
+
+			// Unless we've already completed, wait for the response
+			if( !RPCOperations[RPCID].done ?: true ) {
+				sleep( timeoutSeconds * 1000 );
+			}
+		}
+		// Back in our main thread, we can wait for the RPC operation to complete
+		// This will block until the thread completes or the timeout is reached
+		cfthread( action="join", name=threadName );
+		// If the RPC operation is done, return the result
+		if( RPCOperations[RPCID].done ) {
+			var result = RPCOperations[RPCID].result;
+			RPCOperations.delete( RPCID );
+			return result;
+		} else if( !isNull( defaultValue ) ) {
+			RPCOperations.delete( RPCID );
+			return defaultValue;
+		} else {
+			// If the RPC operation is not done, throw a timeout error
+			RPCOperations.delete( RPCID );
+			throw( type="RPCTimeout", message="RPC operation [#operation#] to peer [#peerName#] timed out after [#timeoutSeconds#] seconds." );
+		}
+	}
+	
+	/**
+	 * Handle an RPC response from a peer.
+	 * This will be called by the peer when it responds to an RPC request.
+	 * @data The data received from the peer, which should be a JSON string containing the operation result
+	 */
+	function onRPCResponse( required string data ) {
+		var response = deserializeJSON( data );
+		var RPCID = response.id;
+
+		// Check if we have a matching RPC operation
+		if( !structKeyExists( RPCOperations, RPCID ) ) {
+			// it already timed out, so just ignore this response
+			return;
+		}
+
+		// Track how long it took
+		response[ 'executionTimeMS' ] = getTickCount() - ( RPCOperations[RPCID].startTick ?: 0 );
+
+		// Mark the operation as done and store the result
+		RPCOperations[RPCID].result = response;
+		RPCOperations[RPCID].done = true;
+		var theThread = RPCOperations[RPCID].thread ?: '';
+		if( !isSimpleValue( theThread ) ) {
+			// Interrupt the thread waiting for the response
+			theThread.interrupt();
+		}
+
+		// if the "original" key doesn't exist, then we crossed paths just after our check above.  The timeout already happened
+		// and cleaned up the RPC operation, and we just re-created worthless keys just now.  Clean and go home.
+		if( !RPCOperations[RPCID].keyExists( "original" ) ) {
+			// Remove the operation from the map
+			RPCOperations.delete( RPCID );
+		}
 	}
 
 	/**

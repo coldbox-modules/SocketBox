@@ -40,6 +40,11 @@ component {
 					line &= message.charAt( position );
 				}
 				position++;
+				// if we're at the end of the message, return
+				// This should happen, but would if the message is malformed and has no line breaks at all!
+				if( position >= len( message ) ) {
+					return line;
+				}
 			}
 			position++;
 			return line;

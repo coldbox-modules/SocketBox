@@ -348,6 +348,38 @@ component extends="WebSocketCore" {
 	}
 
 	/**
+	 * Get all STOMP connections across the entire cluster
+	 */
+	function getClusterSTOMPConnections() {
+		reloadCheck();
+		var results = mapSTOMPConnections();
+		if( isClusterEnabled() ) {
+			RPCClusterRequest( 'getSTOMPCConnections' ).each( (peerName, peerResponse ) => {
+				if( peerResponse.success ) {
+					results.append( peerResponse.result, true );
+				}
+			});
+		}
+		return results;
+	}
+
+	/**
+	 * Map the struct of STOMP connections to an array of data suitable to transfer via text
+	 */
+	private function mapSTOMPConnections() {
+		return application.STOMPBroker.STOMPConnections.reduce( (connections, key, value)=>{
+			connections.append({
+				"login" : value.login,
+				"connectDate" : value.connectDate,
+				"sessionID" : value.sessionID,
+				"server" : getConfig().cluster.name
+			});
+			return connections;
+		}, [] );
+		
+	}
+
+	/**
 	 * Get the connection details for a given channel
 	 *
 	 * @channel The channel to get the connection details for
@@ -634,6 +666,25 @@ component extends="WebSocketCore" {
 			messageText,
 			channel
 		);
+	}
+
+	/**
+	 * A new incoming RPC request has been received.  Allow the backend to claim it before a user-specified method is called.
+	 * Return true if the request was handled, false otherwise.
+	 * 
+	 * @operation The operation to call on the peer
+	 * @args The arguments to pass to the operation
+	 * @id The unique ID of the request
+	 * @peerName The name of the peer that sent the request
+	 * 
+	 * @return boolean True if the request was handled, false otherwise
+	 */
+	Boolean function _onRPCRequest( required string operation, required struct args, required string id, required string peerName ) {
+		switch( operation ) {
+			case "getSTOMPCConnections" :
+				return sendRPCResponse( id, peerName, mapSTOMPConnections() );
+		}
+		return super._onRPCRequest( arguments.operation, arguments.args, arguments.id, arguments.peerName );
 	}
 
 }
