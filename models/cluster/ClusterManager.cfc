@@ -72,12 +72,6 @@ component accessors="true" {
 	property name="startTick" type="numeric";
 
 	/**
-	 * The number of seconds after which a peer is considered expired.
-	 * If a peer has not checked in within this time, it is elligible for removal.
-	 */
-	property name="peerTimeout" type="numeric";
-
-	/**
 	 * Copy of config to prevent circular references during startup
 	 */
 	property name="config" type="struct";
@@ -92,7 +86,6 @@ component accessors="true" {
 		variables.startTick = getTickCount();
 		variables.config = config;
 		variables.clusterManagerKey = createUUID();
-		variables.peerTimeout = 60;
 		variables.socketBox = socketBox;
 		variables.peerConnections = {};
 		variables.lastUpdateTick = getTickCount();
@@ -127,7 +120,7 @@ component accessors="true" {
 		// Now fire up management thread to keep in sync
 		thread name="SocketBoxClusterManager" action="run" {
 			cfsetting( requesttimeout=9999999999 );
-			systemOutput( "SocketBox cluster manager thread started." );
+			println( "SocketBox cluster manager thread started." );
 			sleep( variables.delaySeconds * 1000 );
 
 			// If the application has restarted and we are no longer the current manager, then this thread is done
@@ -138,20 +131,20 @@ component accessors="true" {
 					updateCacheLastCheckin();
 					if( nextRunTick <= getTickCount() ) {
 						updated = true;
-						systemOutput("Checking SocketBox cluster peers after " & variables.delaySeconds & " seconds...");
+						//println("Checking SocketBox cluster peers after " & variables.delaySeconds & " seconds...");
 						checkPeers();
 					}
 					// Check for peer connections every delaySeconds
 					sleep( 2000 );
 				} catch( any e ) {
-					systemOutput("SocketBox error in SocketBox cluster manager: " & e.message);
+					println("SocketBox error in SocketBox cluster manager: " & e.message);
 				} finally {
 					if( updated ) {
 						recalcUpdateDelay();
 					}
 				}
 			}
-			systemOutput( "SocketBox cluster manager thread stopped." );
+			println( "SocketBox cluster manager thread stopped." );
 			shutdownPeerConnections();
 		}
 	}
@@ -185,10 +178,10 @@ component accessors="true" {
 		getCachePeers().each( (cachePeer)=>{
 			if( isPeerExpired( cachePeer ) ) {
 				// This peer has timed out
-				systemOutput( "Removing expired peer from cache: " & cachePeer );
+				println( "SocketBox Removing expired peer from cache: " & cachePeer );
 				removedPeerFromCache( cachePeer );
 			}
-		} );
+		}, true );
 	}
 
 	/**
@@ -198,7 +191,7 @@ component accessors="true" {
 		// Get this every time so it's fresh
 		var nowEpochSeconds = getEpochSeconds();
 		var lastCheckin = val( variables.cacheProvider.get( cacheKeyPrefix & "-" & cachePeer ) ?: '' );
-		return lastCheckin < ( nowEpochSeconds - variables.peerTimeout );
+		return lastCheckin < ( nowEpochSeconds - config.cluster.peerIdleTimeoutSeconds );
 	}
 
 	/**
@@ -218,19 +211,19 @@ component accessors="true" {
 			if( !currentPeers.contains( peerName ) ) {
 				removePeerConnection( peerName );
 			}
-		} );
+		}, true );
 
 		// Ensure any remaining peers are connected
 		variables.peerConnections.each( (peerName, peer)=>{
 			if( !peer.isConnectionOpen() ) {
 				removePeerConnection( peerName, false );
 			}
-		} );
+		}, true );
 
 		// Connect to any new peers that are configured but not yet connected
 		currentPeers.each( (peerName)=>{
 			ensurePeer( peerName );
-		} );
+		}, true );
 	}
 
 	/**
@@ -293,12 +286,12 @@ component accessors="true" {
 		while ( i <= attempts ) {
 			cachedPeers = getCachePeersRaw();
 			if ( cachedPeers contains myPeerName ) {
-				if( i > 1 ) SystemOutput("success adding self to cache!");
+				if( i > 1 ) println("SocketBox success adding self to cache!");
 				return;
 			}
 			// Add ourselves
 			cachedPeers = cachedPeers.listAppend( myPeerName, chr(13) & chr(10) );
-			systemOutput("SocketBox added itself to cache attempt #i#." );
+			println("SocketBox added itself to cache attempt #i#." );
 			variables.cacheProvider.set( cacheKeyPrefix, cachedPeers );
 
 			// Pause 1-3 seconds to allow for other in-process writes to complete
@@ -326,13 +319,13 @@ component accessors="true" {
 		while ( i <= attempts ) {
 			cachedPeers = getCachePeersRaw();
 			if ( !(cachedPeers contains peerName) ) {
-				if( i > 1 ) systemOutput("Success removing peer [#peerName#] from cache!");
+				if( i > 1 ) println("SocketBox Success removing peer [#peerName#] from cache!");
 				return;
 			}
 			// Remove the peer
 			var peersArray = cachedPeers.listToArray( chr(13) & chr(10) ).filter( (peer) => trim(peer) != peerName );
 			cachedPeers = peersArray.toList( chr(13) & chr(10) );
-			systemOutput("SocketBox removed peer [#peerName#] from cache attempt #i#." );
+			println("SocketBox removed peer [#peerName#] from cache attempt #i#." );
 			variables.cacheProvider.set( cacheKeyPrefix, cachedPeers );
 
 			// Pause 1-3 seconds to allow for other in-process writes to complete
@@ -354,7 +347,7 @@ component accessors="true" {
 		}
 		if( !variables.peerConnections.keyExists( peerName ) ) {
 			// If the lock timesout, just ignore.  We'll get it next time
-			lock name="lockName" type="exclusive" timeout=20 throwontimeout=false {
+			lock name="add_peer_#peerName#" type="exclusive" timeout=20 throwontimeout=false {
 				if( !variables.peerConnections.keyExists( peerName ) ) {
 					addPeer( peerName );
 				}
@@ -369,7 +362,7 @@ component accessors="true" {
 	 * @param peerName The name of the peer to connect to
 	 */
 	function addPeer( required string peerName ) {
-		SystemOutput("SocketBox attempting connection to cluster peer: " & peerName);
+		println("SocketBox attempting connection to cluster peer: " & peerName);
 		try {
 			var httpClient = createObject("java", "java.net.http.HttpClient").newHttpClient();
 			var javaURI = createObject("java", "java.net.URI").create( peerName );
@@ -395,15 +388,39 @@ component accessors="true" {
 						[ "java.net.http.WebSocket$Listener" ]
 					)
 				)
-				.get(5, timeUnit.SECONDS)
+				.get(config.cluster.peerConnectionTimeoutSeconds, timeUnit.SECONDS)
 		} catch( any e ) {
-			systemOutput("Error connecting to cluster peer [#peerName#]: " & e.message);
+			// If there are issues connecting to peers, then log this as the cluster updating to keep our manager thread running quickly until things settle down
+			clusterUpdated();
+
+			// Special message for a few specific cases
+
+			// generic timeout
+			if( e.type contains "timeout") {
+				println("SocketBox Timeout connecting to cluster peer [#peerName#]");
+				return;
+			}
+
+			// unresovled hostname
+			if( e.stacktrace contains "UnresolvedAddressException" ) {
+				println("SocketBox Cannot resolve host for cluster peer [#peerName#]");
+				return;
+			}
+
+			if( e.stacktrace contains "ConnectException" ) {
+				println("SocketBox Connection error connecting to cluster peer [#peerName#]");
+				return;
+			}
+
+			// generic connection error
+			println("SocketBox Error connecting to cluster peer [#peerName#]: " & e.message);
+			//println( e.stackTrace )
 			return;
 		}
 
 		peerConnections[peerName] = peer;
 
-		SystemOutput("SocketBox connected to cluster node: " & peerName);
+		println("SocketBox connected to cluster node: " & peerName);
 		clusterUpdated();
 	}
 
@@ -446,7 +463,7 @@ component accessors="true" {
 
 		// If we're in cluster mode, remove ourselves from the cache
 		if( hasCacheProvider() ) {
-			systemOutput("Removing myself from cache...");
+			println("SocketBox - Removing myself from cache...");
 			// Don't try too hard here.  Another node will eventually flush this.
 			// I've found that while testing I often times have a node start right up after shutting down and it's
 			// already tryingn to add itself while another node is still trying to remove it.
@@ -462,12 +479,12 @@ component accessors="true" {
 	 * Shutdown all peer connections
 	 */
 	function shutdownPeerConnections() {
-		systemOutput("Shutting down [#peerConnections.count()#] management connections");
+		println("SocketBox Shutting down [#peerConnections.count()#] management connections");
 		peerConnections.each( (peerName,clusterPeer)=>{
 			try {
 				clusterPeer.close()
 			} catch( any e ) {
-				systemOutput("Error closing management connection [#peerName#]: " & e.message);
+				println("SocketBox Error closing management connection [#peerName#]: " & e.message);
 			}
 		} );
 	}
@@ -491,7 +508,7 @@ component accessors="true" {
 	 * 
 	 * @return The result of the operation, or the default value if the operation times out
 	 */
-	function RPCRequest( required string peerName, required string operation, struct args={}, numeric timeoutSeconds=15, any defaultValue ) {
+	function RPCRequest( required string peerName, required string operation, struct args={}, numeric timeoutSeconds=config.cluster.defaultRPCTimeoutSeconds, any defaultValue ) {
 		var peer = variables.peerConnections[peerName] ?: '';
 		if( isSimpleValue( peer ) ) {
 			if( !isNull( defaultValue ) ) {
@@ -579,7 +596,9 @@ component accessors="true" {
 
 		// if the "original" key doesn't exist, then we crossed paths just after our check above.  The timeout already happened
 		// and cleaned up the RPC operation, and we just re-created worthless keys just now.  Clean and go home.
-		if( !RPCOperations[RPCID].keyExists( "original" ) ) {
+		// Elvis to avoid race conditions if the ID doesn't exist
+		var tmp = RPCOperations[RPCID] ?: {};
+		if( !tmp.keyExists( "original" ) ) {
 			// Remove the operation from the map
 			RPCOperations.delete( RPCID );
 		}
@@ -618,9 +637,9 @@ component accessors="true" {
 	}
 
 	/**
-	 * Shim for Lucee's systemOutput()
+	 * Shim for println()
 	 */
-	private function systemOutput( required message ) {
+	private function println( required message ) {
 		writedump( var=message.toString(), output="console" );
 	}
 

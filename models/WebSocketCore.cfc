@@ -19,7 +19,7 @@ component {
 			// should use the HTTP port that the server is listening on.  Note, if this server is behind a proxy or load balancer, you need to provide
 			// an INTERNAL address and/or port that the other servers in the cluster can connect to directly which doesn't flow through the proxy.
 			// Defaults to the server's hostname and the HTTP port in use.
-			"name" : "ws://#cgi.HTTP_HOST#/ws",
+			"name" : "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#cgi.server_port#/ws",
 			// Hard-coded list of cluster peers to connect to. These are always used regardless of external cache.
 			"peers" : [],
 			// A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
@@ -29,7 +29,17 @@ component {
 			// ALL nodes in the cluster MUST share the same external data store.  This cache will be used for registration and discovery of the other nodes in the cluster
 			"cacheProvider" : "",
 			// Use this if more than one SocketBox cluster is sharing the same backend cache provider.  This prefix will be added to add cache keys
-			"cachePrefix" : ""
+			"cachePrefix" : "",
+			// How long to wait, in seconds, while attempting to connect to a peer in the cluster.  A slow network connection may require a longer timeout so we don't give up too soon,
+			// but waiting too long may be a waste of time if the peer is truly offline.
+			"peerConnectionTimeoutSeconds" : 5,
+			// How long to wait, in seconds, before considering a peer idle and kicking it out of the cluster.  This only applies to peers discovered via the shared cache, and the idle time
+			// is determined by the epoch date each peer updates in their cache key while they are online.  A longer time is more forgiving for a peer experiencing a short network outtage,
+			// but a longer timeout may be a waste of resources if the peer is truly offline and everyone is still trying to connect to it.
+			"peerIdleTimeoutSeconds" : 60,
+			// How long to wait, in seconds, for an RPC request to timeout waiting for a reply.  If there is a defaultValue specified, it will be returne din the event of a timeout.  
+			// If there is no defaultValue specified, then a timeout error will be thrown.
+			"defaultRPCTimeoutSeconds" : 15
 		}
 	};
 	
@@ -69,7 +79,7 @@ component {
 					}
 					break;
 				default:
-					println("Unknown method: #WSMethod#");
+					println("SocketBox Unknown method: #WSMethod#");
 			}
 		} catch (any e) {			
 			println( e );
@@ -135,7 +145,7 @@ component {
 	 * Do not call any methods inside here that call reloadChecks() or you'll get a stack overflow!
 	 */
 	Struct function _configure() {
-		SystemOutput( "SocketBox configuring..." );
+		println( "SocketBox configuring..." );
 		try {
 			// Get config and add in defaults
 			var config = mergeData( duplicate( configDefaults ), configure() );
@@ -168,7 +178,7 @@ component {
 				application.socketBoxClusterManagement.clusterManager.start()
 			}
 		} catch( any e ) {
-			systemOutput( "SocketBox error during configuration: " & e.message );
+			println( "SocketBox error during configuration: " & e.message );
 			// Remove any config we created so we don't leave SocketBox in a corrupted state
 			application.delete( 'SocketBoxConfig' );
 			if( local.config.cluster.enable ?: false ) {
@@ -276,7 +286,7 @@ component {
 		// This channel hash is added to application.socketBoxClusterManagement.managementChannels when the connection is first authenticated
 		var peerName = application.socketBoxClusterManagement.managementChannels[ channelHash ] ?: "";
 		if( len( peerName ) ) {
-			systemOutput("Management connection established from #peerName#");
+			println("SocketBox Management connection established from #peerName#");
 		}
 		// Immediately ensure a connection back to this peer
 		application.socketBoxClusterManagement.clusterManager.ensurePeer( peerName );
@@ -407,11 +417,11 @@ component {
 	 * @peerName The name of the peer to send the request to
 	 * @operation The operation to call on the peer
 	 * @args The arguments to pass to the operation
-	 * @timeoutSeconds The number of seconds to wait for a response (default is 15 seconds)
+	 * @timeoutSeconds The number of seconds to wait for a response
 	 * @defaultValue The default value to return if the request times out or fails
 	 * @return The response from the peer, or the default value if the request fails or times out
 	 */
-	function RPCRequest( required string peerName, required string operation, struct args={}, numeric timeoutSeconds=15, any defaultValue ) {
+	function RPCRequest( required string peerName, required string operation, struct args={}, numeric timeoutSeconds, any defaultValue ) {
 		if( !isClusterEnabled() ) {
 			throw( type="ClusterDisabled", message="Cluster mode is not enabled. Cannot send RPC request." );
 		}
@@ -421,7 +431,7 @@ component {
 	/**
 	 * Send RPC request to all connected peers in the cluster
 	 */
-	function RPCClusterRequest( required string operation, struct args={}, numeric timeoutSeconds=15, any defaultValue ) {
+	function RPCClusterRequest( required string operation, struct args={}, numeric timeoutSeconds, any defaultValue ) {
 		if( !isClusterEnabled() ) {
 			throw( type="ClusterDisabled", message="Cluster mode is not enabled. Cannot send RPC request." );
 		}
@@ -591,16 +601,9 @@ component {
 	}
 
 	/**
-	 * Shim for BoxLang's println()
+	 * Shim for println()
 	 */
 	private function println( required message ) {
-		systemOutput( message, true );
-	}
-
-	/**
-	 * Shim for Lucee's systemOutput()
-	 */
-	private function systemOutput( required message ) {
 		writedump( var=message.toString(), output="console" );
 	}
 

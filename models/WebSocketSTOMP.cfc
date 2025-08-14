@@ -457,7 +457,7 @@ component extends="WebSocketCore" {
 			} );
 
 		} catch( any e ) {
-			systemOutput( "SocketBox STOMP error during configuration: " & e.message );
+			println( "SocketBox STOMP error during configuration: " & e.message );
 			// Remove any config we created so we don't leave SocketBox in a corrupted state
 			application.delete( 'STOMPBroker' );
 			rethrow;
@@ -610,7 +610,8 @@ component extends="WebSocketCore" {
 		for( var destinationID in subs ) {
 			var dest = subs[ destinationID ];
 			for( var subscriptionID in dest ) {
-				if( dest[ subscriptionID ].channelID == channelID ) {
+				// Elvis is race condition protection since subscription ID can disappear from dest at any time
+				if( (dest[ subscriptionID ].channelID ?: '') == channelID ) {
 					dest.delete( subscriptionID );
 				}
 			}
