@@ -91,6 +91,7 @@ component accessors="true" {
 		variables.lastUpdateTick = getTickCount();
 		variables.lockName = "socketbox-cluster-peer-lock-" & createUUID();
 		variables.jThread = createObject( "java", "java.lang.Thread" );
+		variables.jSystem = createObject( "java", "java.lang.System" );
 		if( !isSimpleValue( config.cluster.cacheProvider ) ) {
 			variables.cacheProviderExists = true;
 			variables.cacheProvider = config.cluster.cacheProvider;
@@ -161,11 +162,11 @@ component accessors="true" {
 	}
 
 	/**
-	 * Get the current epoch seconds
+	 * Get the current epoch seconds.  epoch should be in GMT, so the same regardless of timezone
 	 * This is used to store the last checkin time in the cache provider
 	 */
-	function getEpochSeconds() {	
-		return dateDiff("s", createDateTime(1970,1,1,0,0,0), now());
+	function getEpochSeconds() {
+		return int( jSystem.currentTimeMillis()/1000 );
 	}
 
 	/**
