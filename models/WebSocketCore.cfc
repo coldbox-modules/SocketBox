@@ -286,7 +286,7 @@ component {
 		// This channel hash is added to application.socketBoxClusterManagement.managementChannels when the connection is first authenticated
 		var peerName = application.socketBoxClusterManagement.managementChannels[ channelHash ] ?: "";
 		if( len( peerName ) ) {
-			println("SocketBox Management connection established from #peerName#");
+			//println("SocketBox Management connection established from #peerName#");
 		}
 		// Immediately ensure a connection back to this peer
 		application.socketBoxClusterManagement.clusterManager.ensurePeer( peerName );
@@ -310,6 +310,7 @@ component {
 
 		onManagementClose( argumentCollection=arguments );
 	}
+
 	/**
 	 * A new incoming Management connection has been established
 	 */
@@ -466,9 +467,7 @@ component {
 			case "uptime" :
 				return sendRPCResponse( id, peerName, int( application.socketBoxClusterManagement.clusterManager.getStartTick()/1000 ) );
 		}
-		if( !onRPCRequest( operation, args, id, peerName ) ) {
-			throw( type="RPCNotImplemented", message="Unknown RPC request received. Operation: [#operation#]" );
-		}
+		return onRPCRequest( operation, args, id, peerName );
 	}
 
 	/**

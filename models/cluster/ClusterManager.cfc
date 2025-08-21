@@ -196,10 +196,46 @@ component accessors="true" {
 	}
 
 	/**
+	 * Get the manager node for this cluster
+	 * The answer to this can change, so do not cache the output of this, at least not for more than a few seconds.
+	 */
+	function getManagerNode() {
+		if( !hasCacheProvider() ) {
+			if( variables.peerConnections.len() ) {
+				return peerConnections.first();
+			} else {
+				return "";
+			}
+		}
+		var cacheKey = cacheKeyPrefix & "-manager";
+		// Who is the current manager?
+		var manager = variables.cacheProvider.get( cacheKey ) ?: "";
+		// If there is none set, or it's an invalid peer, then make ourselves the manager
+		println( "found manager in cache: " & manager )
+		println( "peerConnections.keyExists( manager ): " & peerConnections.keyExists( manager ) )
+		println( "manager == getMyPeerName(): " & manager == getMyPeerName() )
+		if( !manager.len() || !( variables.peerConnections.keyExists( manager ) || manager == getMyPeerName() ) ) {
+			println( "SocketBox [#getMyPeerName()#] promoted to cluster manager." );
+			variables.cacheProvider.set( cacheKey, getMyPeerName() );
+			return getMyPeerName();
+		}
+		return manager;
+	}
+
+	/**
+	 * Am I the captain now?
+	 * The answer to this can change, so do not cache the output of this, at least not for more than a few seconds.
+	 */
+	function isManager() {
+		return getManagerNode() == getMyPeerName();
+	}
+
+	/**
 	 * I do a full review of all configured cluster peers and ensure there is a connection to each of them, 
 	 * also removing any old connections.
 	 */
 	function checkPeers() {
+
 		// make sure we're registered as a peer in the cache
 		if( hasCacheProvider() ) {
 			ensureMyselfInCache();
@@ -225,6 +261,9 @@ component accessors="true" {
 		currentPeers.each( (peerName)=>{
 			ensurePeer( peerName );
 		}, true );
+
+		// This will ensure we have a valid manager
+		getManagerNode();
 	}
 
 	/**
@@ -363,7 +402,7 @@ component accessors="true" {
 	 * @param peerName The name of the peer to connect to
 	 */
 	function addPeer( required string peerName ) {
-		println("SocketBox attempting connection to cluster peer: " & peerName);
+		println("SocketBox Connecting to cluster peer: " & peerName);
 		try {
 			var httpClient = createObject("java", "java.net.http.HttpClient").newHttpClient();
 			var javaURI = createObject("java", "java.net.URI").create( peerName );
@@ -421,7 +460,7 @@ component accessors="true" {
 
 		peerConnections[peerName] = peer;
 
-		println("SocketBox connected to cluster node: " & peerName);
+		// println("SocketBox connected to cluster node: " & peerName);
 		clusterUpdated();
 	}
 

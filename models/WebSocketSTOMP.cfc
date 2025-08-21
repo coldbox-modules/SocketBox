@@ -140,7 +140,8 @@ component extends="WebSocketCore" {
 							"version" : "1.2",
 							"heart-beat" : "#getConfig().heartBeatMS#,#getConfig().heartBeatMS#",
 							"server" : "SocketBox (STOMP)",
-							"session" : sessionID
+							"session" : sessionID,
+							"host" : getConfig().cluster.name ?: "<unknown>"
 						} )
 						.validate();
 					sendMessage( getMessageParser().serialize(message2), channel )
@@ -368,12 +369,18 @@ component extends="WebSocketCore" {
 	 */
 	private function mapSTOMPConnections() {
 		return application.STOMPBroker.STOMPConnections.reduce( (connections, key, value)=>{
-			connections.append({
-				"login" : value.login,
-				"connectDate" : value.connectDate,
-				"sessionID" : value.sessionID,
-				"server" : getConfig().cluster.name
-			});
+			if( value.channel.isOpen() ) {
+				connections.append({
+					"login" : value.login,
+					"connectDate" : value.connectDate,
+					"sessionID" : value.sessionID,
+					"server" : getConfig().cluster.name
+				});
+			} else {
+				println( "removing dead channel for [#value.login#] from mapSTOMPConnections." )
+				removeAllSubscriptionsForChannel( value.channel );
+				getSTOMPConnections().delete( value.channel.hashCode() );
+			}
 			return connections;
 		}, [] );
 		

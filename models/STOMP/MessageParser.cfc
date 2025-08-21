@@ -16,7 +16,13 @@ component {
 			message.setHeader( "content-length", len( body.getBytes() ) );	
 		}
 		for( var key in message.getHeaders() ) {
-			buffer.append( encode( key ) ).append( ":" ).append( encode( message.getHeaders()[ key ] ) ).append( chr(10) );
+			// All frames except the CONNECT and CONNECTED frames will also escape any carriage return, line feed or colon found in the resulting UTF-8 encoded headers.
+			// https://stomp.github.io/stomp-specification-1.2.html#Value_Encoding
+			if( "CONNECT,CONNECTED".listFindNoCase( message.getCommand() ) ) {
+				buffer.append( key ).append( ":" ).append( message.getHeaders()[ key ] ).append( chr(10) );
+			} else {
+				buffer.append( encode( key ) ).append( ":" ).append( encode( message.getHeaders()[ key ] ) ).append( chr(10) );
+			}
 		}
 		buffer.append( chr(10) ).append( body ).append( NULL_BYTE );
 		return buffer.toString();
