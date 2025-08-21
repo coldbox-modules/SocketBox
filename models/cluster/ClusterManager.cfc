@@ -92,6 +92,7 @@ component accessors="true" {
 		variables.lockName = "socketbox-cluster-peer-lock-" & createUUID();
 		variables.jThread = createObject( "java", "java.lang.Thread" );
 		variables.jSystem = createObject( "java", "java.lang.System" );
+		variables.jFuture = createObject( "java", "java.util.concurrent.CompletableFuture" );
 		if( !isSimpleValue( config.cluster.cacheProvider ) ) {
 			variables.cacheProviderExists = true;
 			variables.cacheProvider = config.cluster.cacheProvider;
@@ -138,7 +139,7 @@ component accessors="true" {
 					// Check for peer connections every delaySeconds
 					sleep( 2000 );
 				} catch( any e ) {
-					println("SocketBox error in SocketBox cluster manager: " & e.message);
+					println("SocketBox error in SocketBox cluster manager: " & e.message & " " & e.tagContext[0].template & ":" & e.tagContext[0].line);
 				} finally {
 					if( updated ) {
 						recalcUpdateDelay();
@@ -211,9 +212,6 @@ component accessors="true" {
 		// Who is the current manager?
 		var manager = variables.cacheProvider.get( cacheKey ) ?: "";
 		// If there is none set, or it's an invalid peer, then make ourselves the manager
-		println( "found manager in cache: " & manager )
-		println( "peerConnections.keyExists( manager ): " & peerConnections.keyExists( manager ) )
-		println( "manager == getMyPeerName(): " & manager == getMyPeerName() )
 		if( !manager.len() || !( variables.peerConnections.keyExists( manager ) || manager == getMyPeerName() ) ) {
 			println( "SocketBox [#getMyPeerName()#] promoted to cluster manager." );
 			variables.cacheProvider.set( cacheKey, getMyPeerName() );
@@ -576,22 +574,30 @@ component accessors="true" {
 		};
 		// Fire off the RPC message to the peer
 		peer.sendText( '__rpc_request__' & message );
+
 		// Start up a thread to wait for the RPC response
 		// This thread will be interrupted when the RPC response is received
 		// or will timeout after the specified number of seconds.
-		var threadName = "rpc_waiter_" & RPCID;
-		cfthread( name=threadName, action="run", RPCID="#RPCID#", timeoutSeconds="#timeoutSeconds#") {
-			// Set our current thread so the response can interrupt us
-			RPCOperations[RPCID].thread = jThread.currentThread();
+		jFuture.runAsync( createDynamicProxy(
+						new cbproxies.models.Runnable( ()=>{
+							// Set our current thread so the response can interrupt us
+							RPCOperations[RPCID].thread = jThread.currentThread();
 
-			// Unless we've already completed, wait for the response
-			if( !RPCOperations[RPCID].done ?: true ) {
-				sleep( timeoutSeconds * 1000 );
-			}
-		}
-		// Back in our main thread, we can wait for the RPC operation to complete
-		// This will block until the thread completes or the timeout is reached
-		cfthread( action="join", name=threadName );
+							try {
+								// Unless we've already completed, wait for the response
+								if( !RPCOperations[RPCID].done ?: true ) {
+										sleep( timeoutSeconds * 1000 );
+								}
+							} catch( any e ) {
+								// We want to ignore the interrupted exception so we don't fill the logs
+							} finally {
+								// Wipe out our reference so this thread isn't randomly interrupted later since it's in a shared pool.
+								RPCOperations[RPCID].thread = '';	
+							}
+						} ),
+						[ "java.lang.Runnable" ]
+					) ).get();
+
 		// If the RPC operation is done, return the result
 		if( RPCOperations[RPCID].done ) {
 			var result = RPCOperations[RPCID].result;
