@@ -313,6 +313,12 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Override to implement your own authentication logic
+	 * 
+	 * @login The login name supplied by the client
+	 * @passcode The passcode supplied by the client
+	 * @host The host name supplied by the client
+	 * @channel The channel the client is connecting through
+	 * @connectionMetadata Additional metadata about the connection for you to populate which will be sent back to the client via the headers of the CONNECTED frame.
 	 */
 	boolean function authenticate( required string login, required string passcode, string host, required channel, required Struct connectionMetadata ) {
 		return true;
@@ -320,6 +326,13 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Override to implement your own authorization logic
+	 * 
+	 * @login The login name supplied by the client
+	 * @exchange The exchange the client is trying to access
+	 * @destination The destination the client is trying to access
+	 * @access The access level being requested
+	 * @channel The channel the client is connecting through
+	 * @connectionMetadata The metadata you set in the authenticate() method about the connection.  Changes will be persisted and passed to any subsequent authorize() calls.  
 	 */
 	boolean function authorize( required string login, required string exchange, required string destination, required string access, required channel, required Struct connectionMetadata ) {
 		return true;
