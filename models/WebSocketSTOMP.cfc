@@ -126,24 +126,31 @@ component extends="WebSocketCore" {
 	function onSTOMPConnect( required message, required channel ) { 
 		logMessage("new STOMP connection");
 		try {
-			if( authenticate( message.getHeader("login",""), message.getHeader("passcode",""), message.getHeader("host", ""), channel ) ) {
+			// Pass this by reference into the authentication function
+			var connectionMetadata = {};
+			if( authenticate( message.getHeader("login",""), message.getHeader("passcode",""), message.getHeader("host", ""), channel, connectionMetadata ) ) {
 					var sessionID = channel.hashCode();
 					getSTOMPConnections()[ channel.hashCode() ] = {
 						"channel" : channel,
 						"login" : message.getHeader("login",""),
 						"connectDate" : now(),
-						"sessionID" : sessionID
+						"sessionID" : sessionID,
+						"connectionMetadata" : connectionMetadata
 					};
-					var message2 = newMessage(
-						"CONNECTED",
-						{
+					// Setup default headers
+					var headers = {
 							"version" : "1.2",
 							"heart-beat" : "#getConfig().heartBeatMS#,#getConfig().heartBeatMS#",
 							"server" : "SocketBox (STOMP)",
 							"session" : sessionID,
 							"host" : getConfig().cluster.name ?: "<unknown>"
-						} )
-						.validate();
+						};
+					
+						// Mix in our connection metadata with a prefix
+					connectionMetadata.each( (k,v)=> headers[ 'connectionMetadata-' & k ] = v );
+
+					var message2 = newMessage( "CONNECTED", headers ).validate();
+
 					sendMessage( getMessageParser().serialize(message2), channel )
 			} else {
 				sendError( "Invalid login", "Invalid login", channel, message.getHeader( "receipt", "" ) );
@@ -179,9 +186,10 @@ component extends="WebSocketCore" {
 		var parsedDest = parseDestination( destination );
 		var channelID = channel.hashCode();
 		var login = getSTOMPConnections()[ channelID ].login ?: '';
+		var connectionMetadata = getSTOMPConnections()[ channelID ].connectionMetadata ?: {};
 		
 		try {
-			if( !authorize( login, parsedDest.exchange, parsedDest.destination, "write", channel ) ) {
+			if( !authorize( login, parsedDest.exchange, parsedDest.destination, "write", channel, connectionMetadata ) ) {
 				sendError( "Authorization failure", "Login [#login#] is not authorized with write access to the destination [#parsedDest.exchange#/#parsedDest.destination#]", channel, message.getHeader( "receipt", "" ) );
 				return;
 			}	
@@ -203,9 +211,10 @@ component extends="WebSocketCore" {
 		var destination = message.getHeader( "destination" );
 		var channelID = channel.hashCode();
 		var login = getSTOMPConnections()[ channelID ].login ?: '';
+		var connectionMetadata = getSTOMPConnections()[ channelID ].connectionMetadata ?: {};
 		try {
 			// Check if the user is authorized to read from the destination
-			if( !authorize( login, "", destination, "read", channel ) ) {
+			if( !authorize( login, "", destination, "read", channel, connectionMetadata ) ) {
 				sendError( "Authorization failure", "Login [#login#] is not authorized with read access to the destination [#destination#]", channel, message.getHeader( "receipt", "" ) );
 				return;
 			}	
@@ -305,14 +314,14 @@ component extends="WebSocketCore" {
 	/**
 	 * Override to implement your own authentication logic
 	 */
-	boolean function authenticate( required string login, required string passcode, string host, required channel ) {
+	boolean function authenticate( required string login, required string passcode, string host, required channel, required Struct connectionMetadata ) {
 		return true;
 	}
 
 	/**
 	 * Override to implement your own authorization logic
 	 */
-	boolean function authorize( required string login, required string exchange, required string destination, required string access, required channel ) {
+	boolean function authorize( required string login, required string exchange, required string destination, required string access, required channel, required Struct connectionMetadata ) {
 		return true;
 	}
 

@@ -139,7 +139,7 @@ component accessors="true" {
 					// Check for peer connections every delaySeconds
 					sleep( 2000 );
 				} catch( any e ) {
-					println("SocketBox error in SocketBox cluster manager: " & e.message & " " & e.tagContext[0].template & ":" & e.tagContext[0].line);
+					println("SocketBox error in SocketBox cluster manager: " & e.message & " " & (e.tagContext[0].template ?: "") & ":" & (e.tagContext[0].line ?: 0) );
 				} finally {
 					if( updated ) {
 						recalcUpdateDelay();
