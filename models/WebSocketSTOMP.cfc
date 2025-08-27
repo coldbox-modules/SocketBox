@@ -70,6 +70,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * A new incoming message has been received.  Let's parse it and give it the STOMP treatment.
+	 * 
+	 * @messageText The message object
+	 * @channel The channel the message came from
 	 */
 	function onMessage( required messageText, required channel ) {
 		// PING messages are empty
@@ -120,7 +123,7 @@ component extends="WebSocketCore" {
 	/**
 	 * Handle a new STOMP connection.  If you override this method, make sure you call super.onSTOMPConnect() to ensure the connection is properly established.
 	 *
-	 * @message The connect message
+	 * @message The connect message object
 	 * @channel The channel the message was received on
 	 */
 	function onSTOMPConnect( required message, required channel ) { 
@@ -177,7 +180,7 @@ component extends="WebSocketCore" {
 	/**
 	 * Handle a new STOMP message.  If you override this method, make sure you call super.onSend() to ensure the message is properly routed.
 	 *
-	 * @message the message
+	 * @message the message object
 	 * @channel the channel the message was received on
 	 */
 	function onSend( required message, required channel ) {
@@ -204,6 +207,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP subscription.  If you override this method, make sure you call super.onSubscribe() to ensure the subscription is properly established.
+	 *
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onSubscribe( required message, required channel ) {
 		logMessage("STOMP SUBSCRIBE message received");
@@ -245,6 +251,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP unsubscription.  If you override this method, make sure you call super.onUnsubscribe() to ensure the subscription is properly removed.
+	 *
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onUnsubscribe( required message, required channel ) {
 		logMessage("STOMP UNSUBSCRIBE message received");
@@ -261,6 +270,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP ACK message.  If you override this method, make sure you call super.onAck() to ensure the message is properly acknowledged.
+	 *
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onAck( required message, required channel ) {
 		logMessage("STOMP ACK message received");
@@ -272,6 +284,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP NACK message.  If you override this method, make sure you call super.onNack() to ensure the message is properly acknowledged.
+	 *
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onNack( required message, required channel ) {
 		logMessage("STOMP NACK message received");
@@ -283,6 +298,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP BEGIN message.  If you override this method, make sure you call super.onBegin() to ensure the transaction is properly started.
+	 *
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onBegin( required message, required channel ) {
 		logMessage("STOMP BEGIN message received");
@@ -293,6 +311,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP COMMIT message.  If you override this method, make sure you call super.onCommit() to ensure the transaction is properly committed.
+	 *
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onCommit( required message, required channel ) {
 		logMessage("STOMP COMMIT message received");
@@ -303,6 +324,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Handle a new STOMP ABORT message.  If you override this method, make sure you call super.onAbort() to ensure the transaction is properly aborted.
+	 * 
+	 * @message The message object
+	 * @channel The channel the message came from
 	 */
 	function onAbort( required message, required channel ) {
 		logMessage("STOMP ABORT message received");
@@ -340,6 +364,11 @@ component extends="WebSocketCore" {
 
 	/**
 	 * Send a message from the server side to all subscribers of a destination
+	 * 
+	 * @destination The destination to send the message to
+	 * @messageData The data to include in the message
+	 * @headers Any additional headers to include with the message
+	 * @rebroadcast Whether to rebroadcast the message to other cluster nodes
 	 */
 	function send( required string destination, required any messageData, struct headers={}, boolean rebroadcast=true ) {
 		reloadCheck();		
@@ -667,6 +696,9 @@ component extends="WebSocketCore" {
 
 	/**
 	 * A new incoming Management message has been received.  Don't override this method.
+	 * 
+	 * @message The message
+	 * @channel The channel the message came from
 	 */
 	private function _onManagementMessage( required message, required channel ) {
 		if( application.socketBoxClusterManagement.selfChannels.keyExists( channel.hashcode() ) ) {

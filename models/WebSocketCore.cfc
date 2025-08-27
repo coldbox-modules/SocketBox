@@ -245,7 +245,9 @@ component {
 
 
 	/**
-	 * A new incoming connection has been established
+	 * A new incoming connection has been established.  DDon't override this method.
+	 * 
+	 * @channel The channel the connection was received on
 	 */
 	function _onConnect( required channel ) {
 		application.socketBoxClusterManagement.channels[ channel.hashcode() ] = channel;
@@ -253,28 +255,36 @@ component {
 	}
 
 	/**
-	 * A connection has been closed
+	 * A connection has been closed.  Don't override this method.
+	 * 
+	 * @channel The channel the connection was closed on
 	 */
 	function _onClose( required channel ) {
 		application.socketBoxClusterManagement.channels.delete( channel.hashcode() );
 		onClose( argumentCollection=arguments );
 	}
 	/**
-	 * A new incoming connection has been established
+	 * A new incoming connection has been established.  Override this to handle a new connection.
+	 * 
+	 * @channel The channel the connection was received on
 	 */
 	function onConnect( required channel ) {
 		// override me
 	}
 
-	/**
-	 * A connection has been closed
+	/*
+	 * A connection has been closed.  Override this to handle a closed connection.
+	 * 
+	 * @channel The channel the connection was closed on
 	 */
 	function onClose( required channel ) {
 		// override me
 	}
 
 	/**
-	 * A new incoming management connection has been established
+	 * A new incoming management connection has been established.  Don't override this method.
+	 * 
+	 * @channel The channel the connection was received on
 	 */
 	function _onManagementConnect( required channel ) {
 		var channelHash = channel.hashcode();
@@ -299,7 +309,9 @@ component {
 	}
 
 	/**
-	 * A Management connection has been closed
+	 * A Management connection has been closed.  Don't override this method.
+	 * 
+	 * @channel The channel the connection was closed on
 	 */
 	function _onManagementClose( required channel ) {
 		var channelHash = channel.hashcode();
@@ -312,21 +324,25 @@ component {
 	}
 
 	/**
-	 * A new incoming Management connection has been established
+	 * A new incoming Management connection has been established.  Override this to handle a new connection.
+	 * 
+	 * @channel The channel the connection was received on
 	 */
 	function onManagementConnect( required channel ) {
 		// override me
 	}
 
 	/**
-	 * A Management connection has been closed
+	 * A Management connection has been closed.  Override this to handle a closed connection.
+	 * 
+	 * @channel The channel the connection was closed on
 	 */
 	function onManagementClose( required channel ) {
 		// override me
 	}
 
 	/**
-	 * Get all connections
+	 * Get all connection.  If in cluster mode, this will not include management connections.  
 	 */
 	function getAllConnections() {
 		if( isClusterEnabled() ) {
@@ -338,7 +354,7 @@ component {
 	}
 
 	/**
-	 * Get all management connections
+	 * Get all management connections, wrapped in a ClusterPeer instance.  If not in cluster mode, this will throw an exception.
 	 */
 	function getAllManagementConnections() {
 		if( !isClusterEnabled() ) {
@@ -353,6 +369,9 @@ component {
 
 	/**
 	 * A new incoming message has been received.  Don't override this method.
+	 * 
+	 * @message The message text
+	 * @channel The channel the message was received on
 	 */
 	private function _onMessage( required message, required channel ) {
 		var messageText = message;
@@ -365,6 +384,9 @@ component {
 
 	/**
 	 * A new incoming message has been received.  Override this method.
+	 * 
+	 * @message The message text
+	 * @channel The channel the message was received on
 	 */
 	function onMessage( required message, required channel ) {
 		// Override me
@@ -372,6 +394,9 @@ component {
 
 	/**
 	 * A new incoming Management message has been received.  Don't override this method.
+	 * 
+	 * @message The message text
+	 * @channel The channel the message was received on
 	 */
 	private function _onManagementMessage( required message, required channel ) {
 		if( application.socketBoxClusterManagement.selfChannels.keyExists( channel.hashcode() ) ) {
@@ -430,7 +455,12 @@ component {
 	}
 	
 	/**
-	 * Send RPC request to all connected peers in the cluster
+	 * Send RPC request to all connected peers in the cluster asynchronously.
+	 * 
+	 * @operation The operation to call on each peer
+	 * @args The arguments to pass to the operation
+	 * @timeoutSeconds The number of seconds to wait for a response
+	 * @defaultValue The default value to return if the request times out or fails
 	 */
 	function RPCClusterRequest( required string operation, struct args={}, numeric timeoutSeconds, any defaultValue ) {
 		if( !isClusterEnabled() ) {
@@ -448,7 +478,7 @@ component {
 						"result" : ""
 					};
 				}
-			}, false );
+			}, true );
 	}
 
 	/**
@@ -515,6 +545,9 @@ component {
 
 	/**
 	 * A new incoming Management message has been received.  Override this method.
+	 * 
+	 * @message The message text
+	 * @channel The channel the message was received on
 	 */
 	function onManagementMessage( required message, required channel ) {
 		// Override me
@@ -526,6 +559,9 @@ component {
 
 	/**
 	 * Send a message to a specific channel
+	 * 
+	 * @message The message text
+	 * @channel The channel to send the message to
 	 */
 	function sendMessage( required message, required channel ) {
 		//println("sending message to specific channel: #message#");
@@ -533,7 +569,10 @@ component {
 	}
 
 	/**
-	 * Broadcast a message to all connected channels
+	 * Broadcast a message to all connected channels.  This does not include management channels if in cluster mode.
+	 * 
+	 * @message The message text
+	 * @rebroadcast Whether to rebroadcast the message to other cluster peers.
 	 */
 	function broadcastMessage( required message, boolean rebroadcast=true ) {
 		if( isClusterEnabled() ) {
@@ -552,7 +591,10 @@ component {
 	}
 
 	/**
-	 * Broadcast a Management message to all connected channels
+	 * Broadcast a Management message to all connected channels.
+	 * 
+	 * @message The message text
+	 * @excludePeer A peer to exclude from the broadcast.  Leave empty for none.
 	 */
 	function broadcastManagementMessage( required message, excludePeer="" ) {
 		if( !isClusterEnabled() ) {
@@ -646,7 +688,10 @@ component {
 
 	
 	/**
-	* Merges data from source into target
+	* Merges data from source into target.  Target is modified by reference, and also returned from the method for chaining.
+	*
+	* @target The target object to merge data into
+	* @source The source object to merge data from
 	*/
 	function mergeData( any target, any source ) {
 
