@@ -148,7 +148,7 @@ component {
 		println( "SocketBox configuring..." );
 		try {
 			// Get config and add in defaults
-			var config = mergeData( duplicate( configDefaults ), configure() );
+			var config = mergeData( configure(), duplicate( configDefaults ) );
 
 			if( !structKeyExists( local, "config" ) || !isStruct( local.config ) ) {
 				throw( type="InvalidConfiguration", message="WebSocket configure() method must return a struct" );
@@ -205,9 +205,9 @@ component {
 		// This may just be defaults right now
 		var config = application.SocketBoxConfig ?: configDefaults;
 		
-		if( ( config.debugMode && (request.socketBoxReloaded ?: false) ) || !isInitted( config ) ) {
+		if( ( config.debugMode && !(request.socketBoxReloaded ?: false) ) || !isInitted( config ) ) {
 			cflock( name="WebSocketBrokerInit", type="exclusive", timeout=60 ) {
-				if( ( config.debugMode && (request.socketBoxReloaded ?: false) ) || !isInitted( config ) ) {
+				if( ( config.debugMode && !(request.socketBoxReloaded ?: false) ) || !isInitted( config ) ) {
 					// Only let debug mode reload once per request
 					if( config.debugMode ) {
 						request.socketBoxReloaded = true;
