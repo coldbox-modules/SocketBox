@@ -181,7 +181,7 @@ component accessors="true" {
 			if( isPeerExpired( cachePeer ) ) {
 				// This peer has timed out
 				socketBox.logMessage( "SocketBox Removing expired peer from cache: " & cachePeer );
-				removedPeerFromCache( cachePeer );
+				removePeerFromCache( cachePeer, 3 );
 			}
 		}, true );
 	}
@@ -348,7 +348,7 @@ component accessors="true" {
 	 * @param attempts The number of attempts to remove the peer before giving up. Default is 5.
 	 * 
 	 */
-	function removedPeerFromCache( required string peerName, numeric attempts=3 ) {
+	function removePeerFromCache( required string peerName, numeric attempts=3 ) {
 		var cacheKey = cacheKeyPrefix & "-" & peerName;
 		variables.cacheProvider.clear( cacheKey );
 
@@ -506,7 +506,7 @@ component accessors="true" {
 			// I've found that while testing I often times have a node start right up after shutting down and it's
 			// already tryingn to add itself while another node is still trying to remove it.
 			// No use fighting over it.
-			removedPeerFromCache( myPeerName, 2 );
+			removePeerFromCache( myPeerName, 2 );
 		}
 
 		shutdownPeerConnections();
