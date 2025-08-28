@@ -30,7 +30,6 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
     public void function onOpen(required any webSocket) {
 		execute(
 			()=>{
-				//systemOutput("WebSocket connection opened");
 				setWebSocket( webSocket );
 				setWebsocketHash( webSocket.hashCode() );
 				// Must request messages to start receiving them
@@ -51,7 +50,6 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 		execute(
 			()=>{
 				var message = data.toString();
-				systemOutput("Cluster peer Received: " & message);
 				
 				// Request next message
 				webSocket.request(1);
@@ -74,7 +72,6 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 		execute(
 			()=>{
 				var size = data.remaining();
-				systemOutput("Received binary data: " & size & " bytes");
 				
 				// Request next message
 				webSocket.request(1);
@@ -96,7 +93,6 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
     public any function onClose(required any webSocket, required numeric statusCode, required string reason) {
 		execute(
 			()=>{
-				//systemOutput("WebSocket closed - Status: " & statusCode & ", Reason: " & reason);
 				getClusterManager().removePeerConnection( this.getPeerName(), false );
 				return createObject("java", "java.util.concurrent.CompletableFuture").completedFuture(javaCast("null", ""));
 			},
@@ -113,7 +109,7 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
     public void function onError(required any webSocket, required any error) {
 		execute(
 			()=>{
-				systemOutput("WebSocket error: " & error.getMessage());
+				socketBox.logMessage("WebSocket error: " & error.getMessage());
 			},
 			"ManagementListener",
 			arguments
@@ -133,7 +129,6 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 			var future = variables.webSocket.sendText(arguments.message, true);
 			future.get()
 		}
-		//systemOutput("Sent: " & arguments.message);
     }
     
 	/**
@@ -147,7 +142,6 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 		}
 		lock name="websocket_#getWebsocketHash()#" timeout=60 type="exclusive" {
 			variables.webSocket.sendBinary(arguments.data, true);
-			systemOutput("Binary data sent");
 		}
     }
 
@@ -163,16 +157,8 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 			var future = variables.webSocket.sendClose(1000, "SocketBox Peer [#clusterManager.getMyPeerName()#] shutting down");
 			future.get();
 		}
-		//systemOutput("Connection closed<br>");
     }
- 
-	/**
-	 * systemoutput shim
-	 */
-	private function systemOutput( required message ) {
-		writedump( var=message.toString(), output="console" );
-	}
-		
+ 		
 	/**
 	 * Check if the peer connection is open
 	 * @return true if the connection is open, false otherwise
@@ -183,7 +169,7 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 				!webSocket.isInputClosed() && 
 				!webSocket.isOutputClosed();
 		} catch( any e ) {
-			systemOutput("Error checking peer connection status: " & e.message);
+			socketBox.logMessage("Error checking peer connection status: " & e.message);
 			return false;
 		}
 	}

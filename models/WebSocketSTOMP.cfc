@@ -428,7 +428,7 @@ component extends="WebSocketCore" {
 					"server" : getConfig().cluster.name
 				});
 			} else {
-				println( "removing dead channel for [#value.login#] from mapSTOMPConnections." )
+				logMessage( "removing dead channel for [#value.login#] from mapSTOMPConnections." )
 				removeAllSubscriptionsForChannel( value.channel );
 				getSTOMPConnections().delete( value.channel.hashCode() );
 			}
@@ -467,10 +467,10 @@ component extends="WebSocketCore" {
 	 */
 	Struct function _configure() {
 		try {
-			// Setup core config
-			var config = super._configure();
-			
-			mergeData( config, variables.STOMPconfigDefaults );
+			// Setup core config			
+			application.SocketBoxConfig = mergeData( duplicate( variables.STOMPconfigDefaults ), super._configure() );
+
+			var config = application.SocketBoxConfig;
 
 			// Add STOMP specific config
 			application.STOMPBroker = {
@@ -579,18 +579,7 @@ component extends="WebSocketCore" {
 			result.destination = listRest( destination, "/" );
 		}
 		return result;
-	}
-
-	/**
-	 * Log a message if debug mode is on
-	 */
-	private function logMessage( required any message ) {
-		if( getConfig().debugMode ) {
-			println( arguments.message );
-		}
-	}
-
-	
+	}	
 
 	/**
 	 * Logic for creating a server-side subscription

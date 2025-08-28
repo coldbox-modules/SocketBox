@@ -47,7 +47,7 @@ component {
 	 * Front controller for all WebSocket incoming messages
 	 */
 	remote function onProcess( string WSMethod="" ) {
-				reloadCheck();
+		reloadCheck();
 		try {
 			var currentExchange = application.socketBox.serverClass.getCurrentExchange();
 			var methodArgs = currentExchange.getAttachment( application.socketBox.WEBSOCKET_REQUEST_DETAILS ) ?: [];
@@ -79,7 +79,7 @@ component {
 					}
 					break;
 				default:
-					println("SocketBox Unknown method: #WSMethod#");
+					logMessage("SocketBox Unknown method: #WSMethod#");
 			}
 		} catch (any e) {			
 			println( e );
@@ -145,10 +145,10 @@ component {
 	 * Do not call any methods inside here that call reloadChecks() or you'll get a stack overflow!
 	 */
 	Struct function _configure() {
-		println( "SocketBox configuring..." );
+		logMessage( "SocketBox configuring..." );
 		try {
 			// Get config and add in defaults
-			var config = mergeData( configure(), duplicate( configDefaults ) );
+			var config = mergeData( duplicate( configDefaults ), configure() );
 
 			if( !structKeyExists( local, "config" ) || !isStruct( local.config ) ) {
 				throw( type="InvalidConfiguration", message="WebSocket configure() method must return a struct" );
@@ -201,25 +201,15 @@ component {
 	 * Called every request internally to ensure socketbox is configured
 	 */
 	function reloadCheck() {
-		try {
 		// This may just be defaults right now
 		var config = application.SocketBoxConfig ?: configDefaults;
 		
-		if( ( config.debugMode && !(request.socketBoxReloaded ?: false) ) || !isInitted( config ) ) {
-			cflock( name="WebSocketBrokerInit", type="exclusive", timeout=60 ) {
-				if( ( config.debugMode && !(request.socketBoxReloaded ?: false) ) || !isInitted( config ) ) {
-					// Only let debug mode reload once per request
-					if( config.debugMode ) {
-						request.socketBoxReloaded = true;
-					}
-					//shutdown();
+		if( !isInitted( config ) ) {
+			cflock( name="SocketBoxInit", type="exclusive", timeout=60 ) {
+				if( !isInitted( config ) ) {
 					_configure();
 				}
 			}
-		}
-		} catch( any e ) {
-			rethrow;
-			println( e );
 		}
 	}
 
@@ -295,9 +285,7 @@ component {
 		
 		// This channel hash is added to application.socketBoxClusterManagement.managementChannels when the connection is first authenticated
 		var peerName = application.socketBoxClusterManagement.managementChannels[ channelHash ] ?: "";
-		if( len( peerName ) ) {
-			//println("SocketBox Management connection established from #peerName#");
-		}
+
 		// Immediately ensure a connection back to this peer
 		application.socketBoxClusterManagement.clusterManager.ensurePeer( peerName );
 
@@ -564,7 +552,6 @@ component {
 	 * @channel The channel to send the message to
 	 */
 	function sendMessage( required message, required channel ) {
-		//println("sending message to specific channel: #message#");
 		getWSHandler().sendMessage( channel, message );
 	}
 
@@ -642,9 +629,19 @@ component {
 	}
 
 	/**
+	 * Log a message if debug mode is on.
+	 * Don't call anything like getConfig() from this method which may, in turn, print out logs
+	 */
+	function logMessage( required any message ) {
+		if( application.socketboxConfig.debugMode ?: false ) {
+			println( arguments.message );
+		}
+	}
+
+	/**
 	 * Shim for println()
 	 */
-	private function println( required message ) {
+	function println( required message ) {
 		writedump( var=message.toString(), output="console" );
 	}
 
@@ -656,16 +653,20 @@ component {
 			cflock( name="socketBox-init", type="exclusive", timeout=60 ) {
 				if( isNull( application.socketBox ) ) {
 					try {
-						application.socketBox.serverClass = createObject('java', 'runwar.Server')
-						application.socketBox.SITE_DEPLOYMENT_KEY = createObject('java', 'runwar.undertow.SiteDeploymentManager' ).SITE_DEPLOYMENT_KEY;
-						application.socketBox.WEBSOCKET_REQUEST_DETAILS = createObject('java', 'runwar.undertow.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS;
-						application.socketBox.serverType = "runwar";
-						application.socketBox.deployment = "";
+						application.socketBox = {
+							serverClass : createObject('java', 'runwar.Server'),
+							SITE_DEPLOYMENT_KEY : createObject('java', 'runwar.undertow.SiteDeploymentManager').SITE_DEPLOYMENT_KEY,
+							WEBSOCKET_REQUEST_DETAILS : createObject('java', 'runwar.undertow.WebsocketReceiveListener').WEBSOCKET_REQUEST_DETAILS,
+							serverType : "runwar",
+							deployment : ""
+						};
 					} catch( any e ) {
 						try {
-							application.socketBox.serverClass = createObject('java', 'ortus.boxlang.web.MiniServer')
-							application.socketBox.WEBSOCKET_REQUEST_DETAILS = createObject('java', 'ortus.boxlang.web.handlers.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS;
-							application.socketBox.serverType = "boxlang-miniserver";
+							application.socketBox = {
+								serverClass : createObject('java', 'ortus.boxlang.web.MiniServer'),
+								WEBSOCKET_REQUEST_DETAILS : createObject('java', 'ortus.boxlang.web.handlers.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS,
+								serverType : "boxlang-miniserver"
+							};
 						} catch( any e) {
 							throw( type="ServerTypeNotFound", message="This websocket library can only run in CommandBox or the BoxLang Miniserver." );
 						}
@@ -673,7 +674,7 @@ component {
 				}
 			}
 		}
-		// This song and dance is because threads don't hvae access to the thread local variables to get the current deploy, so we want to capture it when we have a chance for later.
+		// This song and dance is because threads don't have access to the thread local variables to get the current deploy, so we want to capture it when we have a chance for later.
 		if( application.socketBox.serverType == "runwar" && isSimpleValue( application.socketBox.deployment ?: '' ) && !isNull( application.socketBox.serverClass.getCurrentExchange() ) ) {
 			application.socketBox.deployment = application.socketBox.serverClass.getCurrentExchange().getAttachment( application.socketBox.SITE_DEPLOYMENT_KEY );
 		}
