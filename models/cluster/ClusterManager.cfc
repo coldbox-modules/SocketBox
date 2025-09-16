@@ -321,7 +321,7 @@ component accessors="true" {
 		updateCacheLastCheckin();
 		var cachedPeers = "";
 		var i = 1;
-		while ( i <= attempts ) {
+		while ( i <= arguments.attempts ) {
 			cachedPeers = getCachePeersRaw();
 			if ( cachedPeers contains myPeerName ) {
 				if( i > 1 ) socketBox.logMessage("SocketBox success adding self to cache!");
@@ -354,7 +354,7 @@ component accessors="true" {
 
 		var cachedPeers = "";
 		var i = 1;
-		while ( i <= attempts ) {
+		while ( i <= arguments.attempts ) {
 			cachedPeers = getCachePeersRaw();
 			if ( !(cachedPeers contains peerName) ) {
 				if( i > 1 ) socketBox.logMessage("SocketBox Success removing peer [#peerName#] from cache!");

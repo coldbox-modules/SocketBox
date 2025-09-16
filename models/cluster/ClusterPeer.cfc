@@ -31,7 +31,7 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 		execute(
 			()=>{
 				setWebSocket( webSocket );
-				setWebsocketHash( webSocket.hashCode() );
+				setWebsocketHash( createUUID() );
 				// Must request messages to start receiving them
 				webSocket.request(1);
 			},
