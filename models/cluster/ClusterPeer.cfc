@@ -141,7 +141,8 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 			return;
 		}
 		lock name="websocket_#getWebsocketHash()#" timeout=60 type="exclusive" {
-			variables.webSocket.sendBinary(arguments.data, true);
+			var future = variables.webSocket.sendBinary(arguments.data, true);
+			future.get()
 		}
     }
 
@@ -156,6 +157,7 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 		lock name="websocket_#getWebsocketHash()#" timeout=60 type="exclusive" {
 			var future = variables.webSocket.sendClose(1000, "SocketBox Peer [#clusterManager.getMyPeerName()#] shutting down");
 			future.get();
+			variables.delete( "webSocket" );
 		}
     }
  		
