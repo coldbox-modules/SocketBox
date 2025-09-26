@@ -240,7 +240,10 @@ component {
 	 * @channel The channel the connection was received on
 	 */
 	function _onConnect( required channel ) {
-		application.socketBoxClusterManagement.channels[ channel.hashcode() ] = channel;
+		if( isClusterEnabled() ) {
+			application.socketBoxClusterManagement.channels[ channel.hashcode() ] = channel;
+		}		
+		
 		onConnect( argumentCollection=arguments );
 	}
 
@@ -250,7 +253,10 @@ component {
 	 * @channel The channel the connection was closed on
 	 */
 	function _onClose( required channel ) {
-		application.socketBoxClusterManagement.channels.delete( channel.hashcode() );
+		if( isClusterEnabled() ) {
+			application.socketBoxClusterManagement.channels.delete( channel.hashcode() );
+		}
+		
 		onClose( argumentCollection=arguments );
 	}
 	/**
