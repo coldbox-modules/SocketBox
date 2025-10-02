@@ -51,7 +51,7 @@ Methods you can override in your custom `/WebSocket.cfc` are:
 
 Other methods inherited from the the `WebSocketCore.cfc` you can use.
 
-* `sendMessage( required message, required channel )` - Send a string message to a specific channel
+* `sendMessage( required message, required channel, timeoutMS=0 )` - Send a string message to a specific channel
 * `broadcastMessage( required message )` - Send a string message to every connected channel
 * `getAllConnections()` - Returns an array of all channels representing every remote connection to the server.
 
@@ -66,6 +66,8 @@ function onMessage( required message, required channel ) {
 ```
 
 You can build whatever you want on top of this basic functionality, but it's up to you to decide what each message will contain, how it should be parsed, and to track your own list of channels via the onConnect() and onClose() methods if you wish.
+
+`sendMessage()` is async by default.  If you want to wait until the message is finished sending, supply a non-zero `timeoutMS` value, which is how long to wait.
 
 ### Browser/Client code example
 

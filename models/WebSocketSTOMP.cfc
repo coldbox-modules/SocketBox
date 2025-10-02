@@ -639,9 +639,7 @@ component extends="WebSocketCore" {
 			headers,
 			arguments.detail
 		).validate();
-		sendMessage( getMessageParser().serialize( error ), channel );
-		// Give the client a chance to receive it
-		// sleep( 1000 );
+		sendMessage( getMessageParser().serialize( error ), channel, 5000 );
 		// STOMP protocol requires channel to be closed on error
 		channel.close();
 	}

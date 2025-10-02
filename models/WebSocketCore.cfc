@@ -259,6 +259,7 @@ component {
 		
 		onClose( argumentCollection=arguments );
 	}
+
 	/**
 	 * A new incoming connection has been established.  Override this to handle a new connection.
 	 * 
@@ -556,9 +557,14 @@ component {
 	 * 
 	 * @message The message text
 	 * @channel The channel to send the message to
+	 * @timeoutMS The timeout in milliseconds to wait for the message to be sent.  If 0 or less, the message is sent asynchronously.
 	 */
-	function sendMessage( required message, required channel ) {
-		getWSHandler().sendMessage( channel, message );
+	function sendMessage( required message, required channel, timeoutMS=0 ) {
+		if( arguments.timeoutMS > 0 ) {
+			application.socketBox.undertowWebSocketsClass.sendText( message, channel, null, timeoutMS );
+		} else {
+			getWSHandler().sendMessage( channel, message );
+		}
 	}
 
 	/**
@@ -661,6 +667,7 @@ component {
 					try {
 						application.socketBox = {
 							serverClass : createObject('java', 'runwar.Server'),
+							undertowWebSocketsClass : createObject('java', 'io.undertow.websockets.core.WebSockets'),
 							SITE_DEPLOYMENT_KEY : createObject('java', 'runwar.undertow.SiteDeploymentManager').SITE_DEPLOYMENT_KEY,
 							WEBSOCKET_REQUEST_DETAILS : createObject('java', 'runwar.undertow.WebsocketReceiveListener').WEBSOCKET_REQUEST_DETAILS,
 							serverType : "runwar",
@@ -670,6 +677,7 @@ component {
 						try {
 							application.socketBox = {
 								serverClass : createObject('java', 'ortus.boxlang.web.MiniServer'),
+								undertowWebSocketsClass : createObject('java', 'io.undertow.websockets.core.WebSockets'),
 								WEBSOCKET_REQUEST_DETAILS : createObject('java', 'ortus.boxlang.web.handlers.WebsocketReceiveListener' ).WEBSOCKET_REQUEST_DETAILS,
 								serverType : "boxlang-miniserver"
 							};
