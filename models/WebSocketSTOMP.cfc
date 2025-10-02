@@ -640,6 +640,8 @@ component extends="WebSocketCore" {
 			arguments.detail
 		).validate();
 		sendMessage( getMessageParser().serialize( error ), channel, 5000 );
+		// Give the message time to be sent before closing the channel
+		sleep( 10 );
 		// STOMP protocol requires channel to be closed on error
 		channel.close();
 	}
