@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   boxlang:
-    name: BoxLang snapshot / Java 21
+    name: BoxLang bleeding edge / Java 21
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -23,12 +23,10 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up BoxLang snapshot and CommandBox
-        uses: ortus-boxlang/setup-boxlang@1.4.0
+      - name: Set up CommandBox
+        uses: Ortus-Solutions/setup-commandbox@v2.0.1
         with:
-          version: snapshot
-          with-commandbox: true
-          commandbox_version: 6.3.1
+          version: 6.3.1
 
       - name: Install dependencies
         run: box install
@@ -36,10 +34,15 @@ jobs:
       - name: Show runtime versions
         run: |
           java -version
-          boxlang --version
+          box version
+
+      - name: Start BoxLang
+        run: box server start server-boxlang-be.json
 
       - name: Run tests with BoxLang
-        run: box run-script test
+        run: >-
+          curl --fail-with-body --silent --show-error
+          "http://127.0.0.1:8600/tests/runner.cfm?reporter=json&directory=tests.specs"
 
       - name: Verify test result
         shell: bash
@@ -48,6 +51,10 @@ jobs:
             echo '::error::TestBox reported failures or errors.'
             exit 1
           fi
+
+      - name: Stop BoxLang
+        if: always()
+        run: box server stop server-boxlang-be.json
 
   lucee:
     name: Lucee 5.4 / Java 11
@@ -68,7 +75,6 @@ jobs:
         uses: Ortus-Solutions/setup-commandbox@v2.0.1
         with:
           version: 6.3.1
-          install: testbox-cli
 
       - name: Install dependencies
         run: box install
@@ -79,23 +85,12 @@ jobs:
           box version
 
       - name: Start Lucee
-        run: >-
-          box server start
-          cfengine="lucee@5.4.8+2"
-          name=socketbox-ci-lucee
-          host=127.0.0.1
-          port=8599
-          openbrowser=false
-          trayEnable=false
-          saveSettings=false
+        run: box server start server-lucee5.json
 
       - name: Run tests with Lucee
         run: >-
-          box testbox run
-          runner=http://127.0.0.1:8599/tests/runner.cfm
-          directory=tests.specs
-          reporter=json
-          verbose=true
+          curl --fail-with-body --silent --show-error
+          "http://127.0.0.1:8599/tests/runner.cfm?reporter=json&directory=tests.specs"
 
       - name: Verify test result
         shell: bash
@@ -107,4 +102,4 @@ jobs:
 
       - name: Stop Lucee
         if: always()
-        run: box server stop socketbox-ci-lucee
+        run: box server stop server-lucee5.json

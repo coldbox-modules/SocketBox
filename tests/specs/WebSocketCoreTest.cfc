@@ -1,6 +1,6 @@
 /**
  * Regression tests for SocketBox hot-reconfiguration lifecycle management.
- * Run with: box run-script test
+ * Run with either checked-in CommandBox server config and request /tests/runner.cfm.
  */
 component extends="tests.resources.ApplicationScopedBase" {
 

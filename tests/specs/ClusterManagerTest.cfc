@@ -1,13 +1,14 @@
 /**
  * Regression tests for SocketBox cluster resource management.
- * Run with: box run-script test
+ * Run with either checked-in CommandBox server config and request /tests/runner.cfm.
  */
 component extends="testbox.system.BaseSpec" {
 
 function selectorThreadCount() {
 	var count = 0;
 	var threadClass = createObject( "java", "java.lang.Thread" );
-	for( var thread in threadClass.getAllStackTraces().keySet() ) {
+	for( var threadEntry in threadClass.getAllStackTraces().entrySet() ) {
+		var thread = threadEntry.getKey();
 		if( thread.isAlive() && thread.getName().matches( "HttpClient-\d+-SelectorManager" ) ) {
 			count++;
 		}

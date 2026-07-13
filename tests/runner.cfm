@@ -17,4 +17,4 @@
 	<cfdirectory action="create" directory="#url.reportpath#" recurse="true">
 </cfif>
 
-<cfinclude template="/testbox/system/runners/HTMLRunner.cfm">
+<cfinclude template="../testbox/system/runners/HTMLRunner.cfm">

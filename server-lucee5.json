@@ -1,0 +1,20 @@
+{
+	"name": "socketbox-lucee5",
+	"openBrowser": false,
+	"profile": "development",
+	"trayEnable": false,
+	"app": {
+		"cfengine": "lucee@5.4.8+2"
+	},
+	"jvm": {
+		"javaVersion": "openjdk11"
+	},
+	"web": {
+		"host": "127.0.0.1",
+		"bindings": {
+			"HTTP": {
+				"listen": "8599"
+			}
+		}
+	}
+}
