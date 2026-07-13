@@ -1,0 +1,105 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  boxlang:
+    name: BoxLang bleeding edge / Java 21
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up CommandBox
+        uses: Ortus-Solutions/setup-commandbox@v2.0.1
+        with:
+          version: 6.3.1
+
+      - name: Install dependencies
+        run: box install
+
+      - name: Show runtime versions
+        run: |
+          java -version
+          box version
+
+      - name: Start BoxLang
+        run: box server start server-boxlang-be.json
+
+      - name: Run tests with BoxLang
+        run: >-
+          curl --fail-with-body --silent --show-error
+          "http://127.0.0.1:8600/tests/runner.cfm?reporter=json&directory=tests.specs"
+
+      - name: Verify test result
+        shell: bash
+        run: |
+          if ! grep -qx 'test.passed=true' tests/results/TEST.properties; then
+            echo '::error::TestBox reported failures or errors.'
+            exit 1
+          fi
+
+      - name: Stop BoxLang
+        if: always()
+        run: box server stop server-boxlang-be.json
+
+  lucee:
+    name: Lucee 5.4 / Java 11
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Set up CommandBox
+        uses: Ortus-Solutions/setup-commandbox@v2.0.1
+        with:
+          version: 6.3.1
+
+      - name: Install dependencies
+        run: box install
+
+      - name: Show runtime versions
+        run: |
+          java -version
+          box version
+
+      - name: Start Lucee
+        run: box server start server-lucee5.json
+
+      - name: Run tests with Lucee
+        run: >-
+          curl --fail-with-body --silent --show-error
+          "http://127.0.0.1:8599/tests/runner.cfm?reporter=json&directory=tests.specs"
+
+      - name: Verify test result
+        shell: bash
+        run: |
+          if ! grep -qx 'test.passed=true' tests/results/TEST.properties; then
+            echo '::error::TestBox reported failures or errors.'
+            exit 1
+          fi
+
+      - name: Stop Lucee
+        if: always()
+        run: box server stop server-lucee5.json

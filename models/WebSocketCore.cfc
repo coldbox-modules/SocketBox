@@ -19,7 +19,7 @@ component {
 			// should use the HTTP port that the server is listening on.  Note, if this server is behind a proxy or load balancer, you need to provide
 			// an INTERNAL address and/or port that the other servers in the cluster can connect to directly which doesn't flow through the proxy.
 			// Defaults to the server's hostname and the HTTP port in use.
-			"name" : "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#cgi.server_port#/ws",
+			"name" : getDefaultClusterName(),
 			// Hard-coded list of cluster peers to connect to. These are always used regardless of external cache.
 			"peers" : [],
 			// A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
@@ -42,6 +42,21 @@ component {
 			"defaultRPCTimeoutSeconds" : 15
 		}
 	};
+
+	/**
+	 * Build the default cluster address from the current web request.
+	 * Non-web contexts use port 80 until an explicit configured name replaces
+	 * this construction-time default.
+	 */
+	private function getDefaultClusterName() {
+		var serverPort = 80;
+		try {
+			serverPort = cgi.server_port;
+		} catch( any ignored ) {
+			// Non-web contexts have no CGI scope.
+		}
+		return "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#serverPort#/ws";
+	}
 	
 	/**
 	 * Front controller for all WebSocket incoming messages
@@ -155,9 +170,26 @@ component {
 			}
 			application.SocketBoxConfig = local.config;
 
+			// A reconfiguration must explicitly stop the previous manager before
+			// replacing it. Its peer connections belong to its shared HTTP client
+			// and cannot be transferred safely to a new manager.
+			var oldManager = '';
+			if(
+				application.keyExists( 'socketBoxClusterManagement' ) &&
+				application.socketBoxClusterManagement.keyExists( 'clusterManager' )
+			) {
+				oldManager = application.socketBoxClusterManagement.clusterManager;
+			}
+			if( !isSimpleValue( oldManager ) ) {
+				try {
+					oldManager.shutdown();
+				} finally {
+					application.delete( 'socketBoxClusterManagement' );
+				}
+			}
+
 			// Setup the cluster if enabled
 			if( local.config.cluster.enable ) {
-				var oldManager = application.socketBoxClusterManagement.clusterManager ?: '';
 				application.socketBoxClusterManagement = {
 					"clusterManager" : new cluster.ClusterManager( this, config ),
 					// Incoming connections from regular clients
@@ -168,12 +200,6 @@ component {
 					// cluster name is configured correctly.
 					"selfChannels" : {}
 				};
-
-				// Don't let existing connections leak
-				if( !isSimpleValue( oldManager ) ) {
-					application.socketBoxClusterManagement.clusterManager.setPeerConnections( oldManager.getPeerConnections() );
-				}
-				
 				// Start the cluster manager once the config is fully set up
 				application.socketBoxClusterManagement.clusterManager.start()
 			}

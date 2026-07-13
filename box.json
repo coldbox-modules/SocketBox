@@ -3,6 +3,9 @@
     "dependencies":{
         "cbproxies":"^1.7.0+8"
     },
+    "devDependencies":{
+        "testbox":"^7.0.0+19"
+    },
     "description":"WebSocket Listener library to be used with CommandBox Websocket and BoxLang WebSocket server.",
     "documentation":"https://forgebox.io/view/socketbox",
     "homepage":"https://forgebox.io/view/socketbox",
@@ -12,7 +15,8 @@
         "/tests/"
     ],
     "installPaths":{
-        "cbproxies":"models/cluster/cbproxies/"
+        "cbproxies":"models/cluster/cbproxies/",
+        "testbox":"testbox/"
     },
     "license":[
         {
@@ -29,7 +33,8 @@
     },
     "scripts":{
         "onRelease":"publish",
-        "postPublish":"!git push --follow-tags"
+        "postPublish":"!git push --follow-tags",
+        "test":"!testbox/run"
     },
     "shortDescription":"WebSocket Listener library",
     "slug":"socketbox",
