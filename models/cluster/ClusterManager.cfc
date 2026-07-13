@@ -77,12 +77,20 @@ component accessors="true" {
 	property name="config" type="struct";
 
 	/**
+	 * Shared HTTP client for all outgoing cluster WebSocket connections.
+	 * Creating a client per connection creates a SelectorManager thread per attempt.
+	 */
+	property name="httpClient" type="any";
+
+	/**
 	 * Constructor
 	 * @socketBox The SocketBox instance to use for cluster management
 	 * @config The configuration for the SocketBox instance.  This is mostly to avoid circular references. during startup.
+	 * @httpClient Optional HTTP client override, primarily for testing
+	 * @peerListenerFactory Optional WebSocket listener factory, primarily for testing
 	 * @return The ClusterManager instance
 	 */
-	function init( required any socketBox, required struct config ) {
+	function init( required any socketBox, required struct config, any httpClient, any peerListenerFactory ) {
 		variables.startTick = getTickCount();
 		variables.config = config;
 		variables.clusterManagerKey = createUUID();
@@ -93,6 +101,17 @@ component accessors="true" {
 		variables.jThread = createObject( "java", "java.lang.Thread" );
 		variables.jSystem = createObject( "java", "java.lang.System" );
 		variables.jFuture = createObject( "java", "java.util.concurrent.CompletableFuture" );
+		variables.httpClient = !isNull( arguments.httpClient )
+			? arguments.httpClient
+			: createObject( "java", "java.net.http.HttpClient" ).newHttpClient();
+		variables.httpClientShutdown = false;
+		variables.shutdownRequested = createObject( "java", "java.util.concurrent.atomic.AtomicBoolean" ).init( false );
+		variables.resourceShutdownStarted = createObject( "java", "java.util.concurrent.atomic.AtomicBoolean" ).init( false );
+		variables.pendingConnectionFutures = createObject( "java", "java.util.concurrent.ConcurrentHashMap" ).init();
+		variables.peerListenerFactoryExists = arguments.keyExists( "peerListenerFactory" ) && !isNull( arguments.peerListenerFactory );
+		if( variables.peerListenerFactoryExists ) {
+			variables.peerListenerFactory = arguments.peerListenerFactory;
+		}
 		if( !isSimpleValue( config.cluster.cacheProvider ) ) {
 			variables.cacheProviderExists = true;
 			variables.cacheProvider = config.cluster.cacheProvider;
@@ -147,7 +166,7 @@ component accessors="true" {
 				}
 			}
 			socketBox.logMessage( "SocketBox cluster manager thread stopped." );
-			shutdownPeerConnections();
+			shutdownResources();
 		}
 	}
 
@@ -177,13 +196,20 @@ component accessors="true" {
 		if( !hasCacheProvider() ) {
 			return;
 		}
-		getCachePeers().each( (cachePeer)=>{
+		var expiredPeers = getCachePeers().filter( (cachePeer)=>{
 			if( isPeerExpired( cachePeer ) ) {
-				// This peer has timed out
 				socketBox.logMessage( "SocketBox Removing expired peer from cache: " & cachePeer );
-				removePeerFromCache( cachePeer, 3 );
+				return true;
 			}
-		}, true );
+			return false;
+		} );
+
+		// Remove all expired peers with a single read/modify/write cycle. Running one
+		// non-atomic update per peer in parallel allows those updates to overwrite
+		// one another and reintroduce stale peers.
+		if( expiredPeers.len() ) {
+			removePeersFromCache( expiredPeers, 3 );
+		}
 	}
 
 	/**
@@ -323,7 +349,10 @@ component accessors="true" {
 		var i = 1;
 		while ( i <= arguments.attempts ) {
 			cachedPeers = getCachePeersRaw();
-			if ( cachedPeers contains myPeerName ) {
+			var cachedPeersArray = cachedPeers
+				.listToArray( chr(13) & chr(10) )
+				.map( ( peer )=>trim( peer ) );
+			if ( cachedPeersArray.contains( myPeerName ) ) {
 				if( i > 1 ) socketBox.logMessage("SocketBox success adding self to cache!");
 				return;
 			}
@@ -349,29 +378,67 @@ component accessors="true" {
 	 * 
 	 */
 	function removePeerFromCache( required string peerName, numeric attempts=3 ) {
-		var cacheKey = cacheKeyPrefix & "-" & peerName;
-		variables.cacheProvider.clear( cacheKey );
+		return removePeersFromCache( [ peerName ], arguments.attempts );
+	}
 
-		var cachedPeers = "";
+	/**
+	 * Remove one or more peers from the cache provider in a single update.
+	 * The generic cache API has no compare-and-set operation, so verify each write
+	 * and retry if another cluster node changed the shared peer list concurrently.
+	 *
+	 * @peerNames The peer names to remove
+	 * @attempts The number of attempts before giving up
+	 * @return true when all requested peers are absent from the shared list
+	 */
+	function removePeersFromCache( required array peerNames, numeric attempts=3 ) {
+		var peersToRemove = {};
+		arguments.peerNames.each( ( peerName )=>{
+			if( len( trim( peerName ) ) ) {
+				peersToRemove[ trim( peerName ) ] = true;
+				variables.cacheProvider.clear( cacheKeyPrefix & "-" & trim( peerName ) );
+			}
+		} );
+
+		if( !peersToRemove.len() ) {
+			return true;
+		}
+
 		var i = 1;
 		while ( i <= arguments.attempts ) {
-			cachedPeers = getCachePeersRaw();
-			if ( !(cachedPeers contains peerName) ) {
-				if( i > 1 ) socketBox.logMessage("SocketBox Success removing peer [#peerName#] from cache!");
-				return;
+			var cachedPeers = getCachePeers();
+			var remainingPeers = cachedPeers.filter( ( peerName )=>!peersToRemove.keyExists( peerName ) );
+
+			if( remainingPeers.len() == cachedPeers.len() ) {
+				if( i > 1 ) socketBox.logMessage( "SocketBox successfully removed expired peers from cache." );
+				return true;
 			}
-			// Remove the peer
-			var peersArray = cachedPeers.listToArray( chr(13) & chr(10) ).filter( (peer) => trim(peer) != peerName );
-			cachedPeers = peersArray.toList( chr(13) & chr(10) );
-			socketBox.logMessage("SocketBox removed peer [#peerName#] from cache attempt #i#." );
-			variables.cacheProvider.set( cacheKeyPrefix, cachedPeers );
 
-			// Pause 1-3 seconds to allow for other in-process writes to complete
-			sleep( randRange( 1000, 3000 ) );
+			socketBox.logMessage( "SocketBox removed [#cachedPeers.len() - remainingPeers.len()#] peer(s) from cache attempt #i#." );
+			variables.cacheProvider.set( cacheKeyPrefix, remainingPeers.toList( chr(13) & chr(10) ) );
 
-			// Double check our work in the next loop iteration
+			if( !cacheContainsAnyPeers( peersToRemove ) ) {
+				return true;
+			}
+
+			// Briefly stagger retries made by multiple cluster nodes.
+			sleep( randRange( 25, 100 ) );
+
 			i++;
 		}
+
+		return !cacheContainsAnyPeers( peersToRemove );
+	}
+
+	/**
+	 * Check whether the shared cache list contains any key in the supplied struct.
+	 */
+	private boolean function cacheContainsAnyPeers( required struct peers ) {
+		for( var peerName in getCachePeers() ) {
+			if( arguments.peers.keyExists( peerName ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -380,7 +447,7 @@ component accessors="true" {
 	 * @param peerName The name of the peer to connect to
 	 */
 	function ensurePeer( required string peerName ) {
-		if( peerName == myPeerName ) {
+		if( peerName == myPeerName || variables.shutdownRequested.get() ) {
 			return; // Don't connect to ourselves
 		}
 		if( !variables.peerConnections.keyExists( peerName ) ) {
@@ -400,15 +467,24 @@ component accessors="true" {
 	 * @param peerName The name of the peer to connect to
 	 */
 	function addPeer( required string peerName ) {
+		if( variables.shutdownRequested.get() ) {
+			return;
+		}
 		socketBox.logMessage("SocketBox Connecting to cluster peer: " & peerName);
+		var connectionFuture;
+		var connectionFutureCreated = false;
+		var connectionAttemptKey = createUUID();
 		try {
-			var httpClient = createObject("java", "java.net.http.HttpClient").newHttpClient();
 			var javaURI = createObject("java", "java.net.URI").create( peerName );
-
 			var peer = new ClusterPeer( socketbox, this, peerName );
+			var connectionTimeoutMS = max( 1, int( config.cluster.peerConnectionTimeoutSeconds * 1000 ) );
+			var duration = createObject( "java", "java.time.Duration" );
 
-			var timeUnit = createObject("java", "java.util.concurrent.TimeUnit");
-			httpClient.newWebSocketBuilder()
+			connectionFuture = variables.httpClient.newWebSocketBuilder()
+				// Apply the timeout to the actual WebSocket handshake. A timeout on
+				// CompletableFuture.get() alone only stops waiting and leaves the
+				// connection attempt running in the background.
+				.connectTimeout( duration.ofMillis( javaCast( "long", connectionTimeoutMS ) ) )
 				// Authorization header
 				.header(
 					"socketbox-management",
@@ -421,31 +497,42 @@ component accessors="true" {
 				)
 				.buildAsync(
 					javaURI,
-					createDynamicProxy(
-						peer,
-						[ "java.net.http.WebSocket$Listener" ]
-					)
-				)
-				.get(config.cluster.peerConnectionTimeoutSeconds, timeUnit.SECONDS)
+					createPeerListener( peer )
+				);
+			connectionFutureCreated = true;
+			variables.pendingConnectionFutures.put( connectionAttemptKey, connectionFuture );
+
+			if( variables.shutdownRequested.get() ) {
+				connectionFuture.cancel( true );
+				return;
+			}
+
+			// The builder timeout completes the future exceptionally, so this wait
+			// cannot outlive the configured handshake timeout.
+			connectionFuture.get();
 		} catch( any e ) {
-			// If there are issues connecting to peers, then log this as the cluster updating to keep our manager thread running quickly until things settle down
-			clusterUpdated();
+			// Ensure a caller-side timeout or interruption cannot leave a pending
+			// handshake retaining the HTTP client and its SelectorManager thread.
+			if( connectionFutureCreated && !connectionFuture.isDone() ) {
+				connectionFuture.cancel( true );
+			}
 
 			// Special message for a few specific cases
+			var errorDetail = lCase( "#e.type# #e.message# #e.stackTrace#" );
 
 			// generic timeout
-			if( e.type contains "timeout") {
+			if( errorDetail contains "timeout" ) {
 				socketBox.logMessage("SocketBox Timeout connecting to cluster peer [#peerName#]");
 				return;
 			}
 
 			// unresovled hostname
-			if( e.stacktrace contains "UnresolvedAddressException" ) {
+			if( errorDetail contains "unresolvedaddressexception" ) {
 				socketBox.logMessage("SocketBox Cannot resolve host for cluster peer [#peerName#]");
 				return;
 			}
 
-			if( e.stacktrace contains "ConnectException" ) {
+			if( errorDetail contains "connectexception" ) {
 				socketBox.logMessage("SocketBox Connection error connecting to cluster peer [#peerName#]");
 				return;
 			}
@@ -454,9 +541,17 @@ component accessors="true" {
 			socketBox.logMessage("SocketBox Error connecting to cluster peer [#peerName#]: " & e.message);
 			//println( e.stackTrace )
 			return;
+		} finally {
+			if( connectionFutureCreated ) {
+				variables.pendingConnectionFutures.remove( connectionAttemptKey );
+			}
 		}
 
 		peerConnections[peerName] = peer;
+		if( variables.shutdownRequested.get() ) {
+			removePeerConnection( peerName, true, true );
+			return;
+		}
 
 		// println("SocketBox connected to cluster node: " & peerName);
 		clusterUpdated();
@@ -466,15 +561,16 @@ component accessors="true" {
 	 * Remove a dead peer connection
 	 * @param peerName The name of the peer to remove
 	 * @param close Whether to close the connection or not
+	 * @param force Whether to abort the WebSocket after initiating its close
 	 */
-	function removePeerConnection( required string peerName, boolean close=true ) {
+	function removePeerConnection( required string peerName, boolean close=true, boolean force=false ) {
 		var existed = variables.peerConnections.keyExists( peerName );
 		if( close ) {
 			// May not exist.  Handle without locking
 			var peer = peerConnections[peerName] ?: "";
 			if( !isSimpleValue( peer ) ) {
 				// If already closed, should not error per spec
-				peer.close();
+				peer.close( arguments.force );
 			}			
 		}
 		// Won't fail if not exists
@@ -483,6 +579,19 @@ component accessors="true" {
 		if( existed ) {
 			clusterUpdated();
 		}
+	}
+
+	/**
+	 * Create the JDK WebSocket listener for a cluster peer.
+	 */
+	private function createPeerListener( required any peer ) {
+		if( variables.peerListenerFactoryExists ) {
+			return variables.peerListenerFactory( arguments.peer );
+		}
+		return createDynamicProxy(
+			arguments.peer,
+			[ "java.net.http.WebSocket$Listener" ]
+		);
 	}
 
 	/**
@@ -497,34 +606,93 @@ component accessors="true" {
 	 */
 	function shutdown() {
 		// This will signal to the manager thread to stop
+		variables.shutdownRequested.set( true );
 		variables.clusterManagerKey = "";
 
-		// If we're in cluster mode, remove ourselves from the cache
-		if( hasCacheProvider() ) {
-			socketBox.logMessage("SocketBox - Removing myself from cache...");
-			// Don't try too hard here.  Another node will eventually flush this.
-			// I've found that while testing I often times have a node start right up after shutting down and it's
-			// already tryingn to add itself while another node is still trying to remove it.
-			// No use fighting over it.
-			removePeerFromCache( myPeerName, 2 );
+		try {
+			// If we're in cluster mode, remove ourselves from the cache
+			if( hasCacheProvider() ) {
+				socketBox.logMessage("SocketBox - Removing myself from cache...");
+				// Don't try too hard here. Another node will eventually flush this.
+				// A node can start right after shutdown and add itself while this node
+				// is still trying to remove its old entry, so avoid fighting indefinitely.
+				removePeerFromCache( myPeerName, 2 );
+			}
+		} finally {
+			// Cache failures must never prevent WebSocket and HTTP client cleanup.
+			shutdownResources();
 		}
-
-		shutdownPeerConnections();
-
 	}
 
 	/**
 	 * Shutdown all peer connections
+	 * @force Whether to abort each WebSocket after initiating its close
 	 */
-	function shutdownPeerConnections() {
+	function shutdownPeerConnections( boolean force=false ) {
 		socketBox.logMessage("SocketBox Shutting down [#peerConnections.count()#] management connections");
+		var forceClose = arguments.force;
 		peerConnections.each( (peerName,clusterPeer)=>{
 			try {
-				clusterPeer.close()
+				clusterPeer.close( forceClose )
 			} catch( any e ) {
 				socketBox.logMessage("SocketBox Error closing management connection [#peerName#]: " & e.message);
 			}
 		} );
+		peerConnections.clear();
+	}
+
+	/**
+	 * Close cluster connections and release the shared HTTP client.
+	 */
+	private function shutdownResources() {
+		if( !variables.resourceShutdownStarted.compareAndSet( false, true ) ) {
+			return;
+		}
+		variables.shutdownRequested.set( true );
+		cancelPendingConnections();
+		shutdownPeerConnections( true );
+		shutdownHttpClient();
+	}
+
+	/**
+	 * Cancel handshakes that may still retain the shared HTTP client.
+	 */
+	private function cancelPendingConnections() {
+		for( var connectionFuture in variables.pendingConnectionFutures.values() ) {
+			try {
+				if( !connectionFuture.isDone() ) {
+					connectionFuture.cancel( true );
+				}
+			} catch( any e ) {
+				socketBox.logMessage( "SocketBox Error cancelling pending peer connection: " & e.message );
+			}
+		}
+		variables.pendingConnectionFutures.clear();
+	}
+
+	/**
+	 * Java 21 added explicit HttpClient shutdown methods. On older supported JVMs,
+	 * sharing a single client still bounds the SelectorManager count and closing
+	 * all WebSockets allows the client to be reclaimed with this manager.
+	 */
+	private function shutdownHttpClient() {
+		if( variables.httpClientShutdown || isNull( variables.httpClient ) ) {
+			return;
+		}
+		variables.httpClientShutdown = true;
+
+		if( val( variables.jSystem.getProperty( "java.specification.version" ) ) >= 21 ) {
+			try {
+				variables.httpClient.shutdownNow();
+			} catch( any e ) {
+				socketBox.logMessage( "SocketBox Error shutting down HTTP client: " & e.message );
+			}
+		}
+
+		// Java 11-20 have no public HttpClient shutdown API. Once all WebSockets
+		// are closed, dropping this manager's last client reference allows the
+		// JDK's weak-reference lifecycle to terminate its SelectorManager.
+		variables.delete( "httpClient" );
 	}
 
 	/**

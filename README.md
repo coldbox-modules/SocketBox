@@ -219,6 +219,14 @@ If `debugMode` is set to true, the entire config will be reloaded every request 
 
 The `heartBeatMS` setting controls the number of ms between heartbeat "pings" from every client websocket connection.  Set to `0` to disable this.  Heartbeats are useful so clients can reconnect right away if the connection is interrupted, but can create a lot of network chatter if you have many connections.
 
+#### Cluster lifecycle
+
+When clustering is enabled, SocketBox uses one shared JDK HTTP client per cluster manager for all outgoing peer WebSockets. The `cluster.peerConnectionTimeoutSeconds` setting applies to the actual WebSocket opening handshake. Failed handshakes are cancelled and retried using the cluster manager's adaptive delay; repeated failures do not reset the delay to its fastest interval.
+
+Call the inherited `shutdown()` method from your application's shutdown callback. This removes the server from the shared peer cache, cancels pending handshakes, and closes its peer WebSockets. Java 21 and newer explicitly shut down the shared HTTP client; on Java 11 through 20, reusing one client keeps the selector-thread count bounded and releasing it after the WebSockets close lets its selector be reclaimed.
+
+Cache-backed discovery stores a shared list of peer names plus a last-check-in entry for each peer. Expired peers are removed from the shared list as one verified batch so concurrent cleanup cannot cause in-process removal updates to overwrite one another. Cache providers with atomic collection and expiry operations may still provide stronger guarantees than SocketBox's portable `get()`, `set()`, and `clear()` contract.
+
 #### Exchanges
 
 You can configure exchanges as shown above.  The direct exchange will always be configured by default and you only need to specify it if you want to pass custom bindings to it.  Exchanges receive the incoming messages and decide what destinations, if any, to route them to.  An exchange could route a message to 0 destinations or 1000 destinations.  And each destination could have 0 subscribers or 1000 subscribers.  The exchange abstracts all that away from you.  Publishers simply send messages to an exchange wihtout caring who is subscribed, and subscribers simply receive messages from their subscriptions without caring who sent it.

@@ -29,7 +29,8 @@
     },
     "scripts":{
         "onRelease":"publish",
-        "postPublish":"!git push --follow-tags"
+        "postPublish":"!git push --follow-tags",
+        "test":"!boxlang tests/run.cfm"
     },
     "shortDescription":"WebSocket Listener library",
     "slug":"socketbox",

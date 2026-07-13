@@ -155,9 +155,26 @@ component {
 			}
 			application.SocketBoxConfig = local.config;
 
+			// A reconfiguration must explicitly stop the previous manager before
+			// replacing it. Its peer connections belong to its shared HTTP client
+			// and cannot be transferred safely to a new manager.
+			var oldManager = '';
+			if(
+				application.keyExists( 'socketBoxClusterManagement' ) &&
+				application.socketBoxClusterManagement.keyExists( 'clusterManager' )
+			) {
+				oldManager = application.socketBoxClusterManagement.clusterManager;
+			}
+			if( !isSimpleValue( oldManager ) ) {
+				try {
+					oldManager.shutdown();
+				} finally {
+					application.delete( 'socketBoxClusterManagement' );
+				}
+			}
+
 			// Setup the cluster if enabled
 			if( local.config.cluster.enable ) {
-				var oldManager = application.socketBoxClusterManagement.clusterManager ?: '';
 				application.socketBoxClusterManagement = {
 					"clusterManager" : new cluster.ClusterManager( this, config ),
 					// Incoming connections from regular clients
@@ -168,12 +185,6 @@ component {
 					// cluster name is configured correctly.
 					"selfChannels" : {}
 				};
-
-				// Don't let existing connections leak
-				if( !isSimpleValue( oldManager ) ) {
-					application.socketBoxClusterManagement.clusterManager.setPeerConnections( oldManager.getPeerConnections() );
-				}
-				
 				// Start the cluster manager once the config is fully set up
 				application.socketBoxClusterManagement.clusterManager.start()
 			}

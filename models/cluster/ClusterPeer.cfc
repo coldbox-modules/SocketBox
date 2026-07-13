@@ -148,18 +148,32 @@ component extends="cbproxies.models.BaseProxy" accessors="true" {
 
     /**
 	 * Close the peer connection
+	 * @force Whether to abort the WebSocket after initiating its close
 	 * @return A CompletableFuture indicating the completion of the close operation
 	 */
-    public function close() {
+	public function close( boolean force=false ) {
 		if( isNull( variables.webSocket ) ) {
 			return;
 		}
+		var forceClose = arguments.force;
 		lock name="websocket_#getWebsocketHash()#" timeout=60 type="exclusive" {
-			var future = variables.webSocket.sendClose(1000, "SocketBox Peer [#clusterManager.getMyPeerName()#] shutting down");
-			future.get();
-			variables.delete( "webSocket" );
+			var webSocket = variables.webSocket;
+			try {
+				var future = webSocket.sendClose(1000, "SocketBox Peer [#clusterManager.getMyPeerName()#] shutting down");
+				if( !forceClose ) {
+					future.get();
+				}
+			} finally {
+				try {
+					if( forceClose ) {
+						webSocket.abort();
+					}
+				} finally {
+					variables.delete( "webSocket" );
+				}
+			}
 		}
-    }
+	}
  		
 	/**
 	 * Check if the peer connection is open
