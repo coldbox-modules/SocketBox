@@ -19,7 +19,7 @@ component {
 			// should use the HTTP port that the server is listening on.  Note, if this server is behind a proxy or load balancer, you need to provide
 			// an INTERNAL address and/or port that the other servers in the cluster can connect to directly which doesn't flow through the proxy.
 			// Defaults to the server's hostname and the HTTP port in use.
-			"name" : "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#cgi.server_port#/ws",
+			"name" : getDefaultClusterName(),
 			// Hard-coded list of cluster peers to connect to. These are always used regardless of external cache.
 			"peers" : [],
 			// A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
@@ -42,6 +42,21 @@ component {
 			"defaultRPCTimeoutSeconds" : 15
 		}
 	};
+
+	/**
+	 * Build the default cluster address from the current web request.
+	 * Non-web contexts use port 80 until an explicit configured name replaces
+	 * this construction-time default.
+	 */
+	private function getDefaultClusterName() {
+		var serverPort = 80;
+		try {
+			serverPort = cgi.server_port;
+		} catch( any ignored ) {
+			// Non-web contexts have no CGI scope.
+		}
+		return "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#serverPort#/ws";
+	}
 	
 	/**
 	 * Front controller for all WebSocket incoming messages
