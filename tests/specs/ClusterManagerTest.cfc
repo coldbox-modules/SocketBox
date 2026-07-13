@@ -1,23 +1,8 @@
-<cfscript>
 /**
- * Lightweight regression tests for SocketBox cluster resource management.
+ * Regression tests for SocketBox cluster resource management.
  * Run with: box run-script test
  */
-
-function assertTrue( required boolean condition, required string message ) {
-	if( !arguments.condition ) {
-		throw( type="AssertionFailed", message=arguments.message );
-	}
-}
-
-function assertEquals( required any expected, required any actual, required string message ) {
-	if( arguments.expected != arguments.actual ) {
-		throw(
-			type="AssertionFailed",
-			message="#arguments.message# Expected [#arguments.expected#], actual [#arguments.actual#]."
-		);
-	}
-}
+component extends="testbox.system.BaseSpec" {
 
 function selectorThreadCount() {
 	var count = 0;
@@ -98,13 +83,13 @@ function testSharedHttpClientLifecycle() {
 	var javaVersion = val( createObject( "java", "java.lang.System" ).getProperty( "java.specification.version" ) );
 	var initialSelectors = selectorThreadCount();
 	var manager = newClusterManager( newSocketBoxMock(), newConfig() );
-	assertTrue(
+	$assert.isTrue(
 		waitForSelectorCount( initialSelectors + 1 ),
 		"A cluster manager should create exactly one shared HttpClient selector thread."
 	);
 
 	manager.shutdown();
-	assertTrue(
+	$assert.isTrue(
 		javaVersion >= 21
 			? waitForSelectorCount( initialSelectors )
 			: waitForSelectorCountAfterGC( initialSelectors ),
@@ -146,12 +131,12 @@ function testConnectionTimeoutCancellation() {
 	);
 	manager.addPeer( "ws://offline:8080/ws" );
 
-	assertEquals( 10, webSocketBuilder.connectTimeoutMS, "The timeout must be applied to the WebSocket handshake." );
-	assertTrue(
+	$assert.isEqual( 10, webSocketBuilder.connectTimeoutMS, "The timeout must be applied to the WebSocket handshake." );
+	$assert.isTrue(
 		pendingFuture.cancelled,
 		"An unfinished connection future must be cancelled after an error. Logs: #serializeJSON( socketBox.messages )#"
 	);
-	assertEquals( 0, manager.getPeerConnections().len(), "A failed peer must not be retained." );
+	$assert.isEqual( 0, manager.getPeerConnections().len(), "A failed peer must not be retained." );
 
 	var connectedPeer = { forceClosed : false };
 	connectedPeer.close = ( force )=>{
@@ -159,10 +144,10 @@ function testConnectionTimeoutCancellation() {
 	};
 	manager.setPeerConnections( { "connected-peer" : connectedPeer } );
 	manager.shutdown();
-	assertTrue( connectedPeer.forceClosed, "Manager shutdown must force-close established peer WebSockets." );
-	assertEquals( 0, manager.getPeerConnections().len(), "Manager shutdown must clear established peers." );
+	$assert.isTrue( connectedPeer.forceClosed, "Manager shutdown must force-close established peer WebSockets." );
+	$assert.isEqual( 0, manager.getPeerConnections().len(), "Manager shutdown must clear established peers." );
 	var javaVersion = val( createObject( "java", "java.lang.System" ).getProperty( "java.specification.version" ) );
-	assertEquals(
+	$assert.isEqual(
 		javaVersion >= 21,
 		httpClient.shutdownCalled,
 		"Explicit HTTP client shutdown should only be used when the JVM provides it."
@@ -199,8 +184,8 @@ function testShutdownCancelsPendingHandshake() {
 	);
 	manager.addPeer( "ws://pending:8080/ws" );
 
-	assertTrue( pendingFuture.cancelled, "Manager shutdown must cancel an in-flight peer handshake." );
-	assertEquals( 0, manager.getPeerConnections().len(), "A handshake cancelled by shutdown must not add a peer." );
+	$assert.isTrue( pendingFuture.cancelled, "Manager shutdown must cancel an in-flight peer handshake." );
+	$assert.isEqual( 0, manager.getPeerConnections().len(), "A handshake cancelled by shutdown must not add a peer." );
 }
 
 function testCacheFailureCannotSkipResourceCleanup() {
@@ -232,9 +217,9 @@ function testCacheFailureCannotSkipResourceCleanup() {
 		cacheFailureRaised = true;
 	}
 
-	assertTrue( cacheFailureRaised, "The simulated cache failure should reach the caller." );
-	assertTrue( connectedPeer.forceClosed, "A cache failure must not skip peer WebSocket cleanup." );
-	assertEquals( 0, manager.getPeerConnections().len(), "A cache failure must not leave retained peers." );
+	$assert.isTrue( cacheFailureRaised, "The simulated cache failure should reach the caller." );
+	$assert.isTrue( connectedPeer.forceClosed, "A cache failure must not skip peer WebSocket cleanup." );
+	$assert.isEqual( 0, manager.getPeerConnections().len(), "A cache failure must not leave retained peers." );
 }
 
 function testForceCloseAbortsWebSocket() {
@@ -258,8 +243,8 @@ function testForceCloseAbortsWebSocket() {
 
 	clusterPeer.close( true );
 
-	assertTrue( webSocket.closeSent, "A forced peer close should still initiate a close frame." );
-	assertTrue( webSocket.aborted, "A forced peer close must abort the WebSocket." );
+	$assert.isTrue( webSocket.closeSent, "A forced peer close should still initiate a close frame." );
+	$assert.isTrue( webSocket.aborted, "A forced peer close must abort the WebSocket." );
 }
 
 function testExpiredPeersAreRemovedInOneBatch() {
@@ -300,20 +285,13 @@ function testExpiredPeersAreRemovedInOneBatch() {
 	manager.reapExpiredCachePeers();
 	var remainingPeers = manager.getCachePeers();
 
-	assertEquals( 1, peerListWrites, "Multiple expired peers should be removed with one peer-list write." );
-	assertEquals( 1, remainingPeers.len(), "Only the current peer should remain in the cache list." );
-	assertEquals( currentPeer, remainingPeers[ 1 ], "The active peer must be preserved." );
-	assertTrue( !cacheData.keyExists( "#cacheKeyPrefix#-#expiredPeerOne#" ), "The first expired heartbeat should be cleared." );
-	assertTrue( !cacheData.keyExists( "#cacheKeyPrefix#-#expiredPeerTwo#" ), "The second expired heartbeat should be cleared." );
+	$assert.isEqual( 1, peerListWrites, "Multiple expired peers should be removed with one peer-list write." );
+	$assert.isEqual( 1, remainingPeers.len(), "Only the current peer should remain in the cache list." );
+	$assert.isEqual( currentPeer, remainingPeers[ 1 ], "The active peer must be preserved." );
+	$assert.isTrue( !cacheData.keyExists( "#cacheKeyPrefix#-#expiredPeerOne#" ), "The first expired heartbeat should be cleared." );
+	$assert.isTrue( !cacheData.keyExists( "#cacheKeyPrefix#-#expiredPeerTwo#" ), "The second expired heartbeat should be cleared." );
 
 	manager.shutdown();
 }
 
-testSharedHttpClientLifecycle();
-testConnectionTimeoutCancellation();
-testShutdownCancelsPendingHandshake();
-testCacheFailureCannotSkipResourceCleanup();
-testForceCloseAbortsWebSocket();
-testExpiredPeersAreRemovedInOneBatch();
-writeOutput( "SocketBox cluster regression tests passed." );
-</cfscript>
+}
