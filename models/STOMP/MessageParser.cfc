@@ -13,7 +13,7 @@ component {
 		buffer.append( message.getCommand() ).append( chr(10) );
 		var body = toString( message.getBodyRaw() );
 		if( body != "" ) {
-			message.setHeader( "content-length", len( body.getBytes() ) );	
+			message.setHeader( "content-length", len( body.getBytes( "utf-8" ) ) );	
 		}
 		for( var key in message.getHeaders() ) {
 			// All frames except the CONNECT and CONNECTED frames will also escape any carriage return, line feed or colon found in the resulting UTF-8 encoded headers.
@@ -69,13 +69,15 @@ component {
 					}
 				}
 			} else {
-				for( var i = 0; i < length; i++ ) {
-					if( position >= len( message ) ) {
-						throw( "Unexpected end of message while reading body (found #len(body)# bytes, but content-length header specified #length# bytes)" );
-					}
-					body &= message.charAt( position );
-					position++;
+				// content-length counts octets, but the message has already been decoded to a string, so
+				// character offsets and byte offsets only line up for ASCII. Slice the byte window instead
+				// and decode it back, then advance by the character length of what we decoded.
+				var remainingBytes = mid( message, position + 1, len( message ) - position ).getBytes( "utf-8" );
+				if( arrayLen( remainingBytes ) < length ) {
+					throw( "Unexpected end of message while reading body (found #arrayLen( remainingBytes )# bytes, but content-length header specified #length# bytes)" );
 				}
+				body = createObject( "java", "java.lang.String" ).init( remainingBytes, javaCast( "int", 0 ), javaCast( "int", length ), "utf-8" );
+				position += len( body );
 			}
 			// validate we haven't reached the end of the message and the next char is a null byte
 			if( position >= len( message ) || message.charAt( position ) != NULL_BYTE ) {
