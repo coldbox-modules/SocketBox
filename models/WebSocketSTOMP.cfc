@@ -150,7 +150,7 @@ component extends="WebSocketCore" {
 						};
 					
 						// Mix in our connection metadata with a prefix
-					connectionMetadata.each( (k,v)=> headers[ 'connectionMetadata-' & k ] = v );
+					connectionMetadata.each( (k,v)=> { headers[ 'connectionMetadata-' & k ] = v } );
 
 					var message2 = newMessage( "CONNECTED", headers ).validate();
 
@@ -479,7 +479,7 @@ component extends="WebSocketCore" {
 				STOMPSubscriptions = application.STOMPBroker.STOMPSubscriptions ?: {},
 				STOMPExchanges = {},
 				// Don't blow away connections if debugmode is on
-				STOMPConnections = application.STOMPBroker.STOMPConnections ?: {},
+				STOMPConnections = application.STOMPBroker.STOMPConnections ?: {}
 			};
 			
 
